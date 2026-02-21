@@ -350,6 +350,13 @@
                         <span>Stock-Take</span>
                         <span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-black bg-green-600 text-white uppercase tracking-wider">Count</span>
                     </a>
+                    <a href="#" data-view="grn" class="sidebar-link flex items-center p-4 hover:bg-gray-700">
+                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8 4-8-4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+                        </svg>
+                        <span>GRN</span>
+                        <span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-600 text-white uppercase tracking-wider">Goods Received</span>
+                    </a>
                     <a href="#" data-view="formulations" class="sidebar-link flex items-center p-4 hover:bg-gray-700">
                         <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -435,12 +442,12 @@
                 </nav>
             </div>
             <div class="p-4 border-t border-gray-700">
-                <div id="sync-status" class="text-xs text-gray-400 mb-2 flex items-center justify-between">
-                    <div class="flex items-center">
-                        <span class="w-2 h-2 rounded-full bg-gray-500 mr-2" id="sync-indicator"></span>
-                        <span id="sync-text">Offline Mode</span>
+                <div id="sync-status" class="text-xs mb-2 flex items-center justify-between p-2 rounded bg-gray-800/50" title="Cloud sync status">
+                    <div class="flex items-center min-w-0 flex-1">
+                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 mr-2" id="sync-indicator"></span>
+                        <span id="sync-text" class="text-gray-300 truncate">Offline Mode</span>
                     </div>
-                    <button onclick="refreshFromCloud()" class="text-blue-400 hover:text-blue-300"
+                    <button onclick="refreshFromCloud()" class="text-blue-400 hover:text-blue-300 flex-shrink-0 ml-1"
                         title="Refresh from cloud">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -491,6 +498,7 @@
                     <div id="expiry-tracking-view" class="view"></div>
                     <div id="reorder-assistant-view" class="view"></div>
                     <div id="stock-take-view" class="view"></div>
+                    <div id="grn-view" class="view"></div>
                     <div id="daily-report-view" class="view"></div>
                     <div id="monthly-report-view" class="view"></div>
                     <div id="formulations-view" class="view"></div>
@@ -1559,6 +1567,7 @@
                             var roleSlug = mapFirebaseRoleToSlug(user.role);
                             var toStore = { email: user.email, name: user.name, role: user.role }; if (user.uid) toStore.uid = user.uid;
                             sessionStorage.setItem('INVENTORY_USER', JSON.stringify(toStore));
+                            sessionStorage.setItem('INVENTORY_LAST_ACTIVITY', Date.now().toString());
                             if (typeof window.setInventoryUser === 'function') window.setInventoryUser(user.name || user.email, roleSlug);
                             if (typeof window.loginAs === 'function') window.loginAs(roleSlug, true);
                             closeModal('loginModal');
@@ -1578,6 +1587,7 @@
                 };
                 window.inventoryLogout = function () {
                     sessionStorage.removeItem('INVENTORY_USER');
+                    sessionStorage.removeItem('INVENTORY_LAST_ACTIVITY');
                     if (window._inventoryUseFirebase) {
                         appState = { inventory: { rawMaterials: [], packingMaterials: [], labels: [], finishedGoods: [] }, transactions: [], formulas: [], suppliers: [], customers: [], activeProduction: [], savedCalculations: [], pendingServerActions: [] };
                     }
@@ -1818,6 +1828,7 @@
                 }
                 let saveTimeout = null;
                 let isSyncing = false;
+                let hasUnsyncedChanges = false;
                 let autoSyncEnabled = localStorage.getItem('autoSyncEnabled') === 'true'; // Default: DISABLED for safety
                 let autoRefreshEnabled = localStorage.getItem('autoRefreshEnabled') === 'true'; // Default: DISABLED
                 let refreshInterval = null;
@@ -1910,13 +1921,16 @@
                         console.error("Local save failed", error);
                     }
 
-                    // 2. Trigger Cloud Sync ONLY if auto-sync is enabled (re-check when timer fires so turning OFF stops pending sync)
-                    if ((cloudApiUrl || useFirebase) && autoSyncEnabled) {
-                        updateSyncStatus('pending', 'Waiting to sync...');
-                        if (saveTimeout) clearTimeout(saveTimeout);
-                        saveTimeout = setTimeout(function () { if (autoSyncEnabled) syncToCloud(); }, 2000);
-                    } else if ((cloudApiUrl || useFirebase) && !autoSyncEnabled) {
-                        updateSyncStatus('pending', 'Saved locally (Auto-sync OFF)');
+                    // 2. Mark unsynced when cloud is connected (prompt on leave if user forgets to sync)
+                    if (cloudApiUrl || useFirebase) {
+                        hasUnsyncedChanges = true;
+                        if (autoSyncEnabled) {
+                            updateSyncStatus('pending', 'Waiting to sync...');
+                            if (saveTimeout) clearTimeout(saveTimeout);
+                            saveTimeout = setTimeout(function () { if (autoSyncEnabled) syncToCloud(); }, 2000);
+                        } else {
+                            updateSyncStatus('pending', 'Saved locally (Auto-sync OFF)');
+                        }
                     }
                 }
 
@@ -1969,14 +1983,26 @@
 
                     try {
                         if (useFirebase && window.FirebaseBackend) {
+                            var auditUser = '';
+                            try { var su = sessionStorage.getItem('INVENTORY_USER'); if (su) { var u = JSON.parse(su); auditUser = u.email || u.name || ''; } } catch (e) {}
                             var saveResult = await window.FirebaseBackend.callBackend('save_inventory', {
                                 data: JSON.stringify(appState),
-                                baseVersion: appState._serverVersion || ''
+                                baseVersion: appState._serverVersion || '',
+                                user: auditUser
                             });
                             console.log("Firebase sync result", saveResult);
-                            updateSyncStatus('success', 'Saved to Firebase');
-                            window._postSyncRefresh = true;
-                            setTimeout(function() { if (!isSyncing) fetchFromCloud(); }, 1800);
+                            if (saveResult && (saveResult.code === 'CONFLICT' || (saveResult.result === 'error' && (saveResult.error || '').indexOf('changed by someone else') >= 0))) {
+                                updateSyncStatus('error', 'Conflict – data changed by someone else');
+                                if (typeof showAlert === 'function') showAlert('Someone else saved changes. Refreshing to get the latest data.', 'warning');
+                                setTimeout(function() { if (!isSyncing) fetchFromCloud(); }, 500);
+                            } else if (saveResult && saveResult.result === 'error') {
+                                updateSyncStatus('error', (saveResult.error || 'Sync Failed'));
+                            } else {
+                                hasUnsyncedChanges = false;
+                                updateSyncStatus('success', 'Saved to Firebase');
+                                window._postSyncRefresh = true;
+                                setTimeout(function() { if (!isSyncing) fetchFromCloud(); }, 1800);
+                            }
                         } else {
                             const formData = new URLSearchParams();
                             formData.append('data', JSON.stringify(appState));
@@ -1988,6 +2014,7 @@
                                 body: formData
                             });
                             console.log("Sync request sent");
+                            hasUnsyncedChanges = false;
                             updateSyncStatus('success', 'Saved (Sent)');
                             window._postSyncRefresh = true;
                             setTimeout(function() {
@@ -2002,6 +2029,39 @@
                         isSyncing = false;
                     }
                 }
+
+                window.addEventListener('beforeunload', function (e) {
+                    if (hasUnsyncedChanges && (cloudApiUrl || useFirebase)) {
+                        e.preventDefault();
+                        e.returnValue = 'You have unsynced changes. Sync now or they may be lost.';
+                        return e.returnValue;
+                    }
+                });
+
+                var SESSION_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
+                function updateSessionActivity() {
+                    if (sessionStorage.getItem('INVENTORY_USER')) sessionStorage.setItem('INVENTORY_LAST_ACTIVITY', Date.now().toString());
+                }
+                document.addEventListener('mousedown', updateSessionActivity);
+                document.addEventListener('keydown', updateSessionActivity);
+                setInterval(function () {
+                    if (!window._inventoryUseFirebase || !sessionStorage.getItem('INVENTORY_USER')) return;
+                    var last = parseInt(sessionStorage.getItem('INVENTORY_LAST_ACTIVITY') || '0', 10);
+                    if (!last) return;
+                    if (Date.now() - last > SESSION_TIMEOUT_MS) {
+                        sessionStorage.removeItem('INVENTORY_USER');
+                        sessionStorage.removeItem('INVENTORY_LAST_ACTIVITY');
+                        if (window._inventoryUseFirebase) {
+                            appState = { inventory: { rawMaterials: [], packingMaterials: [], labels: [], finishedGoods: [] }, transactions: [], formulas: [], suppliers: [], customers: [], activeProduction: [], savedCalculations: [], pendingServerActions: [] };
+                        }
+                        if (typeof window.loginAs === 'function') window.loginAs('viewer', true);
+                        if (document.getElementById('current-user-name')) document.getElementById('current-user-name').textContent = 'Guest';
+                        if (typeof window.updateLoginButton === 'function') window.updateLoginButton();
+                        if (typeof renderCurrentView === 'function') renderCurrentView();
+                        if (typeof showAlert === 'function') showAlert('Session expired after 8 hours of inactivity. Please log in again.', 'warning');
+                        if (typeof window.openLoginModal === 'function') window.openLoginModal();
+                    }
+                }, 60000);
 
                 async function testConnection() {
                     const url = document.getElementById('cloud-api-url').value.trim();
@@ -2083,9 +2143,17 @@
                     const indicator = document.getElementById('sync-indicator');
                     const textEl = document.getElementById('sync-text');
 
-                    if (textEl) textEl.textContent = text;
+                    if (textEl) {
+                        textEl.textContent = text;
+                        textEl.classList.remove('text-green-400', 'text-yellow-400', 'text-red-400', 'text-blue-400', 'text-gray-300');
+                        if (status === 'success') textEl.classList.add('text-green-400');
+                        else if (status === 'error') textEl.classList.add('text-red-400');
+                        else if (status === 'pending') textEl.classList.add('text-yellow-400');
+                        else if (status === 'syncing') textEl.classList.add('text-blue-400');
+                        else textEl.classList.add('text-gray-300');
+                    }
                     if (indicator) {
-                        indicator.className = "w-2 h-2 rounded-full mr-2 ";
+                        indicator.className = "w-2.5 h-2.5 rounded-full flex-shrink-0 mr-2 ";
                         if (status === 'syncing') indicator.classList.add('bg-blue-500', 'animate-pulse');
                         else if (status === 'success') indicator.classList.add('bg-green-500');
                         else if (status === 'error') indicator.classList.add('bg-red-500');
@@ -2311,6 +2379,7 @@
                                 } else {
                                     appState.requisitionReservedTotals = appState.requisitionReservedTotals || { rawMaterials: [], packingMaterials: [], labels: [] };
                                 }
+                                hasUnsyncedChanges = false;
                                 updateSyncStatus('success', 'Data loaded');
                                 renderCurrentView();
                             } else {
@@ -2547,7 +2616,7 @@
                             tx.category === category && tx.itemId == item.id && getLocalDateString(tx.date) === targetDateStr
                         );
                         const received = transactionsOnTargetDate.filter(t => t.type === 'receive' || t.type === 'stock-take-adj-in' || t.type === 'production-add').reduce((sum, t) => sum + t.quantity, 0);
-                        const consumed = transactionsOnTargetDate.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume' || t.type === 'dispatch').reduce((sum, t) => sum + t.quantity, 0);
+                        const consumed = transactionsOnTargetDate.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume' || t.type === 'requisition-issue' || t.type === 'dispatch').reduce((sum, t) => sum + (t.quantity > 0 ? t.quantity : -t.quantity), 0);
 
                         if (targetDate < itemOpeningDate) {
                             return { openingStock: 0, received, consumed, closingStock: received - consumed };
@@ -2562,7 +2631,7 @@
                         transactionsBeforeTarget.forEach(tx => {
                             if (tx.type === 'receive' || tx.type === 'stock-take-adj-in' || tx.type === 'production-add') {
                                 openingStock += tx.quantity;
-                            } else if (tx.type === 'consume' || tx.type === 'stock-take-adj-out' || tx.type === 'production-consume' || tx.type === 'dispatch') {
+                            } else if (tx.type === 'consume' || tx.type === 'stock-take-adj-out' || tx.type === 'production-consume' || tx.type === 'requisition-issue' || tx.type === 'dispatch') {
                                 openingStock -= tx.quantity;
                             }
                         });
@@ -2602,7 +2671,7 @@
                         const openingDayStr = item.openingStockDate;
                         const openingDayTxs = transactionsByDate[openingDayStr] || [];
                         const openingDayReceived = openingDayTxs.filter(t => t.type === 'receive' || t.type === 'stock-take-adj-in' || t.type === 'production-add').reduce((sum, t) => sum + t.quantity, 0);
-                        const openingDayConsumed = openingDayTxs.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume').reduce((sum, t) => sum + t.quantity, 0);
+                        const openingDayConsumed = openingDayTxs.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume' || t.type === 'requisition-issue').reduce((sum, t) => sum + (t.quantity > 0 ? t.quantity : -t.quantity), 0);
                         const openingDayClosing = item.openingStock + openingDayReceived - openingDayConsumed;
 
                         ledger.set(openingDayStr, {
@@ -2620,7 +2689,7 @@
 
                             const dailyTxs = transactionsByDate[currentDateStr] || [];
                             const received = dailyTxs.filter(t => t.type === 'receive' || t.type === 'stock-take-adj-in' || t.type === 'production-add').reduce((sum, t) => sum + t.quantity, 0);
-                            const consumed = dailyTxs.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume').reduce((sum, t) => sum + t.quantity, 0);
+                            const consumed = dailyTxs.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume' || t.type === 'requisition-issue').reduce((sum, t) => sum + (t.quantity > 0 ? t.quantity : -t.quantity), 0);
 
                             const closingStockForDay = openingStockForDay + received - consumed;
 
@@ -2698,7 +2767,7 @@
 
                                 if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(tx.type)) {
                                     batchStock[batch] += tx.quantity;
-                                } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(tx.type)) {
+                                } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(tx.type)) {
                                     batchStock[batch] -= tx.quantity;
                                 }
                             }
@@ -2816,6 +2885,8 @@
                             renderReorderAssistantView();
                         } else if (currentView === 'stock-take') {
                             renderStockTakeView();
+                        } else if (currentView === 'grn') {
+                            if (typeof window.renderGRNView === 'function') window.renderGRNView();
                         } else if (currentView === 'suppliers') {
                             renderSuppliersView();
                         } else if (currentView === 'customers') {
@@ -3688,6 +3759,10 @@
                     <p class="text-2xl font-bold text-orange-600">${(wastagePercentage || 0).toFixed(1)}%</p>
                     <p class="text-xs text-gray-400">Of total consumption (₹${(totalWastage || 0).toFixed(0)})</p>
                 </div>
+                <div id="requisition-dashboard-widget" class="bg-white p-6 rounded-lg shadow border-l-4 border-indigo-500">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Requisition</h3>
+                    <p class="text-sm text-gray-500 mt-1">Loading…</p>
+                </div>
             </div>
 
             <!-- Main Charts Row -->
@@ -3782,6 +3857,21 @@
             `;
 
                         renderCharts();
+
+                        (function loadRequisitionWidget() {
+                            var w = document.getElementById('requisition-dashboard-widget');
+                            if (!w) return;
+                            if (useFirebase && typeof window.requisitionCall === 'function') {
+                                window.requisitionCall('get_stage_counts', {}).then(function (data) {
+                                    var c = (data && data.counts) ? data.counts : {};
+                                    w.innerHTML = '<h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Requisition</h3><p class="text-sm text-gray-600 mt-2">Pending approvals: <strong>' + (c.PENDING_APPROVALS || 0) + '</strong></p><p class="text-sm text-gray-600">Pending issue: <strong>' + (c.PENDING_ISSUE || 0) + '</strong></p><p class="text-sm text-gray-600">Today\'s issues: <strong>' + (c.TODAY_ISSUED || 0) + '</strong></p><button type="button" onclick="openRequisitionApp()" class="mt-3 w-full py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-semibold hover:bg-indigo-100">Open Requisition App</button>';
+                                }).catch(function () {
+                                    w.innerHTML = '<h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Requisition</h3><p class="text-sm text-gray-500">Not connected</p><button type="button" onclick="openRequisitionApp()" class="mt-3 w-full py-2 bg-gray-100 text-gray-600 rounded-lg text-sm">Open App</button>';
+                                });
+                            } else {
+                                w.innerHTML = '<h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Requisition</h3><p class="text-sm text-gray-500">Enable Firebase to see counts</p><button type="button" onclick="openRequisitionApp()" class="mt-3 w-full py-2 bg-gray-100 text-gray-600 rounded-lg text-sm">Open App</button>';
+                            }
+                        })();
 
                         document.getElementById('historical-item-select').addEventListener('change', (e) => {
                             const [category, itemId] = e.target.value.split('-');
@@ -3985,9 +4075,12 @@
 
                         try {
                             if (useFirebase && window.FirebaseBackend) {
+                                var auditUser = '';
+                                try { var su = sessionStorage.getItem('INVENTORY_USER'); if (su) { var u = JSON.parse(su); auditUser = u.email || u.name || ''; } } catch (e) {}
                                 var saveResult = await window.FirebaseBackend.callBackend('save_inventory', {
                                     data: JSON.stringify(appState),
-                                    baseVersion: appState._serverVersion || ''
+                                    baseVersion: appState._serverVersion || '',
+                                    user: auditUser
                                 });
                                 if (saveResult && saveResult.status !== 'success' && saveResult.result !== 'success') {
                                     throw new Error(saveResult.error || 'Save failed');
@@ -4587,7 +4680,8 @@
                                         category: item.category,
                                         type: type,
                                         quantity: Math.abs(varianceQty),
-                                        date: stockTakeDate + 'T00:00:00.000Z'
+                                        date: stockTakeDate + 'T00:00:00.000Z',
+                                        adjustmentReason: 'Stock-take'
                                     };
                                     appState.transactions.push(newTx);
                                     adjustmentsMade++;
@@ -4598,6 +4692,118 @@
                             stockTakeData = {}; // Clear session data
                             showView('stock-take'); // Re-render the stock-take view
                         }, "Confirm Finalize Stock-Take");
+                    }
+
+                    var grnLineIndex = 0;
+                    function renderGRNView() {
+                        const container = document.getElementById('grn-view');
+                        if (!container) return;
+                        grnLineIndex = 0;
+                        var supplierOptions = '<option value="">-- Select Supplier --</option><option value="adjustment">Opening Bal / Adjustment</option>';
+                        if (appState.suppliers && appState.suppliers.length) {
+                            appState.suppliers.forEach(function(s) {
+                                if (s.approved) supplierOptions += '<option value="' + (s.id || '') + '">' + (s.name || '').replace(/</g, '&lt;') + '</option>';
+                            });
+                        }
+                        var itemOptions = '';
+                        ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'].forEach(function(cat) {
+                            if (appState.inventory[cat])
+                                appState.inventory[cat].forEach(function(item) {
+                                    itemOptions += '<option value="' + cat + '-' + (item.id != null ? item.id : item.name) + '">' + (item.name || item.id || '').replace(/</g, '&lt;') + ' (' + cat.replace(/([A-Z])/g, ' $1').trim() + ')</option>';
+                                });
+                        });
+                        container.innerHTML = `
+            <h2 class="text-3xl font-bold mb-6">GRN – Goods Received Note</h2>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <p class="text-gray-600 mb-4">Record incoming stock. All lines will create Receive transactions and update inventory.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">GRN No (optional)</label>
+                        <input type="text" id="grn-no" class="w-full p-2 border rounded-md" placeholder="e.g. GRN-001">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Date</label>
+                        <input type="date" id="grn-date" class="w-full p-2 border rounded-md" value="${typeof getToday === 'function' ? getToday() : new Date().toISOString().split('T')[0]}">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Supplier</label>
+                        <select id="grn-supplier" class="w-full p-2 border rounded-md">${supplierOptions}</select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">PO No / Invoice No (optional)</label>
+                        <input type="text" id="grn-po" class="w-full p-2 border rounded-md" placeholder="PO / Invoice">
+                    </div>
+                </div>
+                <div class="overflow-x-auto border rounded-md mb-4">
+                    <table class="min-w-full bg-white">
+                        <thead class="bg-gray-100"><tr>
+                            <th class="p-2 border-b text-left">Item</th>
+                            <th class="p-2 border-b w-28">Qty</th>
+                            <th class="p-2 border-b w-32">Batch</th>
+                            <th class="p-2 border-b w-32">Expiry</th>
+                            <th class="p-2 border-b w-28">Unit Price (₹)</th>
+                            <th class="p-2 border-b w-20"></th>
+                        </tr></thead>
+                        <tbody id="grn-lines-tbody">
+                            <tr class="grn-line-row"><td class="p-2 border-b"><select class="grn-item w-full p-1 border rounded" data-row="0">${itemOptions ? itemOptions : '<option value="">-- No items --</option>'}</select></td><td class="p-2 border-b"><input type="number" step="0.001" min="0" class="grn-qty w-24 p-1 border rounded text-right" value="0"></td><td class="p-2 border-b"><input type="text" class="grn-batch w-full p-1 border rounded" placeholder="Batch"></td><td class="p-2 border-b"><input type="date" class="grn-expiry w-full p-1 border rounded"></td><td class="p-2 border-b"><input type="number" step="0.01" min="0" class="grn-price w-24 p-1 border rounded text-right" placeholder="0"></td><td class="p-2 border-b"><button type="button" onclick="window.removeGRNLine(this)" class="text-red-600 hover:text-red-800 text-sm">Remove</button></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex gap-4 mb-6">
+                    <button type="button" onclick="window.addGRNLine()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">+ Add Line</button>
+                    <button type="button" onclick="window.saveGRN()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold">Save GRN & Update Inventory</button>
+                </div>
+            </div>
+                        `;
+                        window.addGRNLine = function() {
+                            grnLineIndex++;
+                            var tbody = document.getElementById('grn-lines-tbody');
+                            if (!tbody) return;
+                            var row = document.createElement('tr');
+                            row.className = 'grn-line-row';
+                            row.innerHTML = '<td class="p-2 border-b"><select class="grn-item w-full p-1 border rounded" data-row="' + grnLineIndex + '">' + (itemOptions || '<option value="">-- No items --</option>') + '</select></td><td class="p-2 border-b"><input type="number" step="0.001" min="0" class="grn-qty w-24 p-1 border rounded text-right" value="0"></td><td class="p-2 border-b"><input type="text" class="grn-batch w-full p-1 border rounded" placeholder="Batch"></td><td class="p-2 border-b"><input type="date" class="grn-expiry w-full p-1 border rounded"></td><td class="p-2 border-b"><input type="number" step="0.01" min="0" class="grn-price w-24 p-1 border rounded text-right" placeholder="0"></td><td class="p-2 border-b"><button type="button" onclick="window.removeGRNLine(this)" class="text-red-600 hover:text-red-800 text-sm">Remove</button></td>';
+                            tbody.appendChild(row);
+                        };
+                        window.removeGRNLine = function(btn) {
+                            var row = btn && btn.closest && btn.closest('tr');
+                            if (row && document.querySelectorAll('.grn-line-row').length > 1) row.remove();
+                        };
+                        window.saveGRN = function() {
+                            var grnNo = (document.getElementById('grn-no') && document.getElementById('grn-no').value) || ('GRN-' + Date.now());
+                            var grnDate = (document.getElementById('grn-date') && document.getElementById('grn-date').value) || (typeof getToday === 'function' ? getToday() : new Date().toISOString().split('T')[0]);
+                            var supplierVal = document.getElementById('grn-supplier') ? document.getElementById('grn-supplier').value : '';
+                            var poNo = document.getElementById('grn-po') ? document.getElementById('grn-po').value : '';
+                            var supplierId = supplierVal && supplierVal !== 'adjustment' ? parseFloat(supplierVal) : null;
+                            var dateIso = grnDate + 'T00:00:00.000Z';
+                            var lines = document.querySelectorAll('.grn-line-row');
+                            var count = 0;
+                            lines.forEach(function(tr) {
+                                var itemSelect = tr.querySelector('.grn-item');
+                                var qtyInput = tr.querySelector('.grn-qty');
+                                var batchInput = tr.querySelector('.grn-batch');
+                                var expiryInput = tr.querySelector('.grn-expiry');
+                                var priceInput = tr.querySelector('.grn-price');
+                                if (!itemSelect || !qtyInput) return;
+                                var val = itemSelect.value;
+                                if (!val) return;
+                                var qty = parseFloat(qtyInput.value) || 0;
+                                if (qty <= 0) return;
+                                var parts = val.split('-');
+                                var category = parts[0];
+                                var itemId = parts.slice(1).join('-');
+                                if (/^[0-9.]+$/.test(itemId)) itemId = parseFloat(itemId);
+                                var item = typeof findItem === 'function' ? findItem(category, itemId) : null;
+                                var purchasePrice = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
+                                var tx = { id: Date.now() + Math.random(), itemId: itemId, category: category, type: 'receive', quantity: qty, date: dateIso, supplierId: supplierId, poNo: poNo || null, invoiceNo: poNo || null, batchNo: (batchInput && batchInput.value) || null, expDate: (expiryInput && expiryInput.value) || null, sourceReference: 'GRN-' + (document.getElementById('grn-no') && document.getElementById('grn-no').value ? document.getElementById('grn-no').value : grnNo) };
+                                if (purchasePrice > 0) { tx.purchasePrice = purchasePrice; if (item && typeof updateWeightedAverageCost === 'function') updateWeightedAverageCost(item, category, qty, purchasePrice, dateIso); }
+                                appState.transactions.push(tx);
+                                count++;
+                            });
+                            if (count === 0) { if (typeof showAlert === 'function') showAlert('Add at least one line with quantity > 0.', 'Warning'); return; }
+                            saveState();
+                            if (typeof showAlert === 'function') showAlert('GRN saved. ' + count + ' receive transaction(s) recorded. Inventory updated.', 'GRN Saved');
+                            if (typeof showView === 'function') showView('grn');
+                        };
                     }
 
                     async function renderStockAdjustmentRequestsView() {
@@ -4662,6 +4868,8 @@
                             var reasonEl = document.getElementById('adjust-reason');
                             if (actualEl) actualEl.value = req.quantity;
                             if (reasonEl) reasonEl.value = 'From Store request' + (req.requisitionId ? ' (REQ ' + req.requisitionId + ')' : '') + (req.requestedBy ? ' by ' + req.requestedBy : '');
+                            var reasonTypeEl = document.getElementById('adjust-reason-type');
+                            if (reasonTypeEl) reasonTypeEl.value = 'Other';
                         }
                     };
 
@@ -4822,10 +5030,11 @@
                     ${transactionsOnDate.length === 0 ? `<tr><td colspan="4" class="text-center py-4">No transactions.</td></tr>` : transactionsOnDate.map(tx => {
                                 const item = findItem(tx.category, tx.itemId);
                                 let typeDisplay = tx.type;
-                                if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') typeDisplay = 'Stock-Take Adj.';
+                                if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') { typeDisplay = 'Stock-Take Adj.'; if (tx.adjustmentReason) typeDisplay += ' (' + tx.adjustmentReason + ')'; }
                                 else if (tx.type === 'production-add') typeDisplay = 'Production (Add)';
                                 else if (tx.type === 'production-consume') typeDisplay = 'Production (Consume)';
-                                return `<tr class="hover:bg-gray-50"><td class="p-2 border-b">${item ? item.name : 'Unknown'}</td><td class="p-2 border-b"><span class="px-2 inline-flex text-xs font-semibold rounded-full ${tx.type.includes('receive') || tx.type.includes('add') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${typeDisplay.toUpperCase()}</span></td><td class="p-2 border-b text-right">${tx.quantity.toFixed(3)}</td><td class="p-2 border-b text-center"><button onclick="openEditTxModal(${tx.id})" class="text-blue-500 hover:text-blue-700 text-xs">Edit</button></td></tr>`;
+                                else if (tx.type === 'requisition-issue') typeDisplay = 'Requisition Issue';
+                                return `<tr class="hover:bg-gray-50"><td class="p-2 border-b">${item ? item.name : 'Unknown'}</td><td class="p-2 border-b"><span class="px-2 inline-flex text-xs font-semibold rounded-full ${tx.type.includes('receive') || tx.type.includes('add') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${typeDisplay.toUpperCase()}</span></td><td class="p-2 border-b text-right">${(tx.quantity > 0 ? tx.quantity : -tx.quantity).toFixed(3)}</td><td class="p-2 border-b text-center"><button onclick="openEditTxModal(${tx.id})" class="text-blue-500 hover:text-blue-700 text-xs">Edit</button></td></tr>`;
                             }).join('')}
                 </tbody></table></div>`;
                             document.getElementById('daily-report-date-filter').addEventListener('change', (e) => { reportDate = e.target.value; selectedDate = e.target.value; render(); });
@@ -5039,11 +5248,12 @@
                                         ${filteredLedgerEntries.map(entry => {
                                             const txDetails = entry.transactions.map(tx => {
                                                 let typeDisplay = tx.type;
-                                                if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') typeDisplay = 'Stock-Take Adj.';
+                                                if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') { typeDisplay = 'Stock-Take Adj.'; if (tx.adjustmentReason) typeDisplay += ' (' + tx.adjustmentReason + ')'; }
                                                 else if (tx.type === 'production-add') typeDisplay = 'Production (Add)';
                                                 else if (tx.type === 'production-consume') typeDisplay = 'Production (Consume)';
+                                                else if (tx.type === 'requisition-issue') typeDisplay = 'Requisition Issue';
                                                 else if (tx.type === 'dispatch') typeDisplay = 'Sale/Dispatch';
-                                                return `<span class="px-2 inline-flex text-xs font-semibold rounded-full ${tx.type.includes('receive') || tx.type.includes('add') || (tx.type.includes('adj') && tx.type.includes('in')) ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${typeDisplay.toUpperCase()} ${tx.quantity.toFixed(3)}</span>`;
+                                                return `<span class="px-2 inline-flex text-xs font-semibold rounded-full ${tx.type.includes('receive') || tx.type.includes('add') || (tx.type.includes('adj') && tx.type.includes('in')) ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${typeDisplay.toUpperCase()} ${(tx.quantity > 0 ? tx.quantity : -tx.quantity).toFixed(3)}</span>`;
                                             }).join(' ');
                                             return `
                                                 <tr class="text-center text-sm">
@@ -5181,10 +5391,11 @@
                                 closing = dayData.closing;
                                 txDetails = dayData.transactions.map(tx => {
                                     let typeDisplay = tx.type;
-                                    if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') typeDisplay = 'Stock-Take Adj.';
+                                    if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') { typeDisplay = 'Stock-Take Adj.'; if (tx.adjustmentReason) typeDisplay += ' (' + tx.adjustmentReason + ')'; }
                                     else if (tx.type === 'production-add') typeDisplay = 'Production (Add)';
                                     else if (tx.type === 'production-consume') typeDisplay = 'Production (Consume)';
-                                    return `${typeDisplay.toUpperCase()} ${tx.quantity.toFixed(3)}`;
+                                    else if (tx.type === 'requisition-issue') typeDisplay = 'Requisition Issue';
+                                    return `${typeDisplay.toUpperCase()} ${(tx.quantity > 0 ? tx.quantity : -tx.quantity).toFixed(3)}`;
                                 }).join('; ');
                             }
 
@@ -5233,6 +5444,7 @@
                                 if (tx.type === 'receive') party = 'Purchase';
                                 else if (tx.type === 'dispatch') party = 'Sale';
                                 else if (tx.type === 'production-consume') party = 'Production Consumed';
+                                else if (tx.type === 'requisition-issue') party = 'Requisition Issued';
                                 else if (tx.type === 'production-add') party = 'Production Output';
                                 else if (tx.type.includes('adj')) party = 'Stock Adjustment';
                             }
@@ -5240,6 +5452,7 @@
                             let ref = '';
                             if (tx.poNo) ref += `PO:${tx.poNo} `;
                             if (tx.invoiceNo) ref += `Inv:${tx.invoiceNo} `;
+                            if (tx.requestId) ref += `Req:${tx.requestId} `;
 
                             csvContent += [
                                 `"${dateStr}"`,
@@ -5283,6 +5496,7 @@
                                 if (tx.type === 'receive') party = 'Purchase';
                                 if (tx.type === 'dispatch') party = 'Sale';
                                 if (tx.type === 'production-consume') party = 'Production Consumed';
+                                if (tx.type === 'requisition-issue') party = 'Requisition Issued';
                                 if (tx.type === 'production-add') party = 'Production Output';
                                 if (tx.type.includes('adj')) party = 'Stock Adjustment';
                             }
@@ -5290,6 +5504,7 @@
                             let ref = '';
                             if (tx.poNo) ref += `PO:${tx.poNo} `;
                             if (tx.invoiceNo) ref += `Inv:${tx.invoiceNo} `;
+                            if (tx.requestId) ref += `Req:${tx.requestId} `;
 
                             csvContent += [
                                 `"${dateStr}"`,
@@ -7351,7 +7566,7 @@
                                 // Simple addition/subtraction based on type
                                 if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(tx.type)) {
                                     batchStock[batch] += tx.quantity;
-                                } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(tx.type)) {
+                                } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(tx.type)) {
                                     batchStock[batch] -= tx.quantity;
                                 }
                             }
@@ -8451,7 +8666,7 @@
                             appState.transactions.forEach(t => {
                                 if (t.category === 'finishedGoods' && t.itemId === itemId && t.batchNo === b) {
                                     if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(t.type)) qty += t.quantity;
-                                    else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(t.type)) qty -= t.quantity;
+                                    else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) qty -= (t.quantity > 0 ? t.quantity : -t.quantity);
                                 }
                             });
 
@@ -8491,7 +8706,7 @@
                         appState.transactions.forEach(t => {
                             if (t.category === category && t.itemId === itemId && t.batchNo === batchNo) {
                                 if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(t.type)) batchStock += t.quantity;
-                                else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(t.type)) batchStock -= t.quantity;
+                                else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) batchStock -= (t.quantity > 0 ? t.quantity : -t.quantity);
                             }
                         });
 
@@ -8532,7 +8747,10 @@
                         const date = document.getElementById('adjust-date').value;
                         const systemStock = parseFloat(document.getElementById('adjust-system-stock').value);
                         const actualStock = parseFloat(document.getElementById('adjust-actual-stock').value);
+                        const reasonTypeEl = document.getElementById('adjust-reason-type');
+                        const reasonType = reasonTypeEl ? reasonTypeEl.value : '';
                         const reason = document.getElementById('adjust-reason').value;
+                        const reasonDisplay = (reasonType ? reasonType + (reason ? ': ' + reason : '') : reason) || 'Stock Adjustment';
 
                         const batchNo = document.getElementById('adjust-batch-hidden') ? document.getElementById('adjust-batch-hidden').value : null;
 
@@ -8561,7 +8779,8 @@
                             type: type,
                             quantity: quantity,
                             date: date + 'T00:00:00.000Z',
-                            notes: reason || "Stock Adjustment",
+                            adjustmentReason: reasonType || null,
+                            notes: reasonDisplay,
                             updatedBy: currentUserName || 'System',
                             batchNo: batchNo || null
                         };
@@ -8908,9 +9127,10 @@
                                 closingStock += qty;
                             }
                             // Reductions
-                            else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(t.type)) {
-                                consumed += qty;
-                                closingStock -= qty;
+                            else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) {
+                                const outQty = qty > 0 ? qty : -qty;
+                                consumed += outQty;
+                                closingStock -= outQty;
                             }
                         });
 
@@ -8931,7 +9151,7 @@
                                 if (tDate >= dayStart && tDate <= dayEnd) {
                                     const qty = parseFloat(t.quantity) || 0;
                                     if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(t.type)) received += qty;
-                                    else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(t.type)) consumed += qty;
+                                    else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) consumed += (t.quantity > 0 ? t.quantity : -t.quantity);
                                 }
                             });
 
@@ -9279,7 +9499,7 @@
                                 }
                             });
                         }
-                        // Requisition: Store issued first (Option B) – materials reserved until Manager approves
+                        // Requisition: reserved when Manager approved or Store issued (until issue completes)
                         if (appState.requisitionReservedTotals && appState.requisitionReservedTotals[category]) {
                             appState.requisitionReservedTotals[category].forEach(function (r) {
                                 var match = (r.itemId != null && (r.itemId == item.id || r.itemId == item.name)) || (r.itemName && (String(r.itemName).toLowerCase() === String(item.name || '').toLowerCase() || String(r.itemName).toLowerCase() === String(item.id || '').toLowerCase()));
@@ -10965,9 +11185,19 @@
                             </div>
                         </div>
                         <div class="mb-4">
-                            <label class="block text-sm font-medium">Reason / Note</label>
+                            <label class="block text-sm font-medium">Reason</label>
+                            <select id="adjust-reason-type" class="w-full p-2 border rounded-md mb-2" required>
+                                <option value="">-- Select reason --</option>
+                                <option value="Damage">Damage</option>
+                                <option value="Expiry">Expiry</option>
+                                <option value="Write-off">Write-off</option>
+                                <option value="Found">Found</option>
+                                <option value="Stock-take">Stock-take</option>
+                                <option value="Other">Other</option>
+                            </select>
+                            <label class="block text-sm font-medium mt-1">Note (optional)</label>
                             <input type="text" id="adjust-reason" class="w-full p-2 border rounded-md"
-                                placeholder="e.g., Spillage, Theft, Found">
+                                placeholder="e.g., Batch XYZ, details">
                         </div>
                         <div class="flex justify-end gap-2">
                             <button type="button" onclick="closeModal('adjustStockModal')"
@@ -11445,7 +11675,7 @@
                                     if (batchKey !== 'OPENING_STOCK') {
                                         batch.balance += t.quantity;
                                     }
-                                } else if (['dispatch', 'consume', 'stock-take-adj-out', 'production-consume'].includes(t.type)) {
+                                } else if (['dispatch', 'consume', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) {
                                     batch.balance -= t.quantity;
                                 }
                             });
@@ -11648,7 +11878,7 @@
                             if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(t.type)) {
                                 batchStock[batch] += t.quantity;
                                 if (t.expDate || t.expiryDate) batchMeta[batch].expiry = t.expDate || t.expiryDate;
-                            } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(t.type)) {
+                            } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) {
                                 batchStock[batch] -= t.quantity;
                             }
                         });
@@ -12673,7 +12903,7 @@
                                     if (batchKey !== 'OPENING_STOCK') {
                                         batch.balance += t.quantity;
                                     }
-                                } else if (['dispatch', 'consume', 'stock-take-adj-out', 'production-consume'].includes(t.type)) {
+                                } else if (['dispatch', 'consume', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) {
                                     batch.balance -= t.quantity;
                                 }
                             });
@@ -12864,7 +13094,7 @@
                             if (['receive', 'produce', 'stock-take-adj-in', 'production-add'].includes(t.type)) {
                                 batchStock[batch] += t.quantity;
                                 if (t.expDate || t.expiryDate) batchMeta[batch].expiry = t.expDate || t.expiryDate;
-                            } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume'].includes(t.type)) {
+                            } else if (['consume', 'dispatch', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) {
                                 batchStock[batch] -= t.quantity;
                             }
                         });
@@ -20387,7 +20617,7 @@
                                     batch.balance += (parseFloat(t.quantity) || 0);
                                     if (t.mfgDate) batch.mfg = t.mfgDate;
                                     if (t.expDate || t.expiryDate) batch.exp = t.expDate || t.expiryDate;
-                                } else if (['dispatch', 'consume', 'stock-take-adj-out', 'production-consume'].includes(t.type)) {
+                                } else if (['dispatch', 'consume', 'stock-take-adj-out', 'production-consume', 'requisition-issue'].includes(t.type)) {
                                     batch.balance -= (parseFloat(t.quantity) || 0);
                                 }
                             });
