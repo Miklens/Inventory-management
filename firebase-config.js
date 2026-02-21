@@ -16,7 +16,7 @@
     // Free email via Apps Script (no Blaze). Paste script URL after deploy. See docs/EMAIL-FREE-APPS-SCRIPT.md
     APP_SCRIPT_EMAIL_URL: 'https://script.google.com/macros/s/AKfycbw0BE0REK2Oj51j--347PtyyHZfvtUYDIZLc7Ts1CEpBVgrEcbtLhgLIyxJcuF9oRkQkw/exec',
     APP_SCRIPT_EMAIL_SECRET: 'MiklensEmailSecret2024XyZ789',
-    APP_URL: 'https://miklensinventory.netlify.app'
+    APP_URL: 'https://miklens.github.io/Inventory-management'
   };
   if (typeof global !== 'undefined') global.FIREBASE_CONFIG = config;
   if (typeof window !== 'undefined') window.FIREBASE_CONFIG = config;
