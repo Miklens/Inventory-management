@@ -35,17 +35,18 @@
     var finalUrl = (appUrl || backendConfig.APP_URL || 'https://miklens.github.io/Inventory-management').trim();
     var detailsHtml = '';
     if (details && details.length > 0) {
-      detailsHtml = '<div style="margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">' +
-        '<table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px;">' +
+      var cellWrap = 'word-wrap: break-word; word-break: break-word; overflow-wrap: break-word; white-space: normal;';
+      detailsHtml = '<div style="margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;">' +
+        '<table style="width: 100%; min-width: 0; border-collapse: collapse; font-family: sans-serif; font-size: 13px; table-layout: fixed;">' +
         '<thead style="background-color: #f9fafb;"><tr>' +
-        '<th style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; color: #6b7280; text-transform: uppercase; font-size: 10px;">Detail</th>' +
-        '<th style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; color: #6b7280; text-transform: uppercase; font-size: 10px;">Information</th></tr></thead><tbody>';
+        '<th style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; color: #6b7280; text-transform: uppercase; font-size: 10px; width: 28%; ' + cellWrap + '">Detail</th>' +
+        '<th style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; color: #6b7280; text-transform: uppercase; font-size: 10px; ' + cellWrap + '">Information</th></tr></thead><tbody>';
       for (var i = 0; i < details.length; i++) {
         var item = details[i];
         var label = String(item.label || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         var value = String(item.value != null ? item.value : '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-        detailsHtml += '<tr><td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #374151; font-weight: bold;">' + label + '</td>' +
-          '<td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #4b5563;">' + value + '</td></tr>';
+        detailsHtml += '<tr><td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #374151; font-weight: bold; width: 28%; ' + cellWrap + '">' + label + '</td>' +
+          '<td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #4b5563; ' + cellWrap + '">' + value + '</td></tr>';
       }
       detailsHtml += '</tbody></table></div>';
     }
@@ -53,7 +54,7 @@
     var safeTitle = String(title || 'System Update').replace(/</g, '&lt;');
     var safeEvent = String(eventTitle || '').replace(/</g, '&lt;');
     return '<div style="background-color: #f3f4f6; padding: 20px; font-family: \'Segoe UI\', Arial, sans-serif;">' +
-      '<div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">' +
+      '<div style="max-width: 600px; width: 100%; box-sizing: border-box; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">' +
       '<div style="background-color: ' + (color || STATUS_COLORS.INFO) + '; padding: 30px; text-align: center;">' +
       '<div style="color: #ffffff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px;">Miklens Digital Requisition</div>' +
       '<h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 900;">' + safeEvent + '</h1>' +
