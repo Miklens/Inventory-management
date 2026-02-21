@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIKLENS – Inventory & Requisition</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+      color: #fff;
+      padding: 1.5rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    p {
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+    a {
+      display: inline-block;
+      padding: 1rem 1.75rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    a:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    .inv {
+      background: #0d9488;
+      color: #fff;
+    }
+    .req {
+      background: #7c3aed;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>MIKLENS</h1>
+  <p>Inventory &amp; Requisition – choose an app to open</p>
+  <div class="links">
+    <a class="inv" href="MIKLENS_INVENTORY_MANAGEMENT_V27_C.HTML">Open Inventory</a>
+    <a class="req" href="DIGITAL_REQUISITION_APP.html">Open Requisition</a>
+  </div>
+</body>
+</html>
