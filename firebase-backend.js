@@ -92,22 +92,29 @@
 
     if (type === 'approval_needed') {
       eventTitle = 'New Requisition Submitted';
-      title = 'New Requisition';
+      title = 'New Requisition – Approval Required';
       color = STATUS_COLORS.INFO;
+      var reqDate = payload.requestedAt ? new Date(payload.requestedAt).toLocaleString() : '';
       details = [
         { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Requested by', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
         { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.requestedQty != null ? payload.requestedQty : '') + ' ' + (payload.unit || '') },
+        { label: 'Request date', value: reqDate },
         { label: 'Action', value: 'Please approve or reject in the app.' }
       ];
+      var managersList = await getManagerAdminEmails();
       to = (payload.managerEmail || '').trim();
-      if (!to) { var managers = await getManagerAdminEmails(); to = managers.length ? managers.join(',') : ''; }
-      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] New Requisition – Approval Required';
+      if (!to) to = managersList.length ? managersList.join(',') : '';
+      var ccApproval = managersList.filter(function (e) { return to.indexOf(e) < 0; }).join(',');
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] New Requisition – ' + (payload.requesterName || 'Employee') + ' – ' + (payload.productName || '') + ' – Approval Required';
     } else if (type === 'reservation_released') {
       eventTitle = 'Reservation Released';
       title = 'Reservation Expired';
       color = STATUS_COLORS.WARNING;
       details = [
         { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
         { label: 'Reason', value: 'Reservation timed out after ' + (payload.hours || 48) + ' hours.' },
         { label: 'Action', value: 'Re-issue materials from Pending Issue if still needed.' }
       ];
@@ -120,9 +127,11 @@
       color = STATUS_COLORS.INFO;
       details = [
         { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Dispatch ID', value: payload.dispatchId || '' },
         { label: 'Product', value: payload.productName || '' },
         { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
-        { label: 'Requested by', value: payload.requestedBy || '' }
+        { label: 'Requested by', value: payload.requestedBy || '' },
+        { label: 'Action', value: 'Approve or reject in the app.' }
       ];
       var managers1 = await getManagerAdminEmails();
       to = managers1.length ? managers1.join(',') : '';
@@ -135,7 +144,8 @@
         { label: 'Request ID', value: payload.requestId || '' },
         { label: 'Product', value: payload.productName || '' },
         { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
-        { label: 'Approved by', value: payload.approvedBy || '' }
+        { label: 'Approved by', value: payload.approvedBy || '' },
+        { label: 'Action', value: 'You can collect the dispatched items.' }
       ];
       to = (payload.requesterEmail || '').trim();
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Dispatch Approved';
@@ -158,10 +168,54 @@
       details = [
         { label: 'Request ID', value: payload.formulaRequestId || '' },
         { label: 'Status', value: payload.status || '' },
-        { label: 'Resolved by', value: payload.resolvedBy || '' }
+        { label: 'Resolved by', value: payload.resolvedBy || '' },
+        { label: 'Action', value: 'Check the app for details.' }
       ];
       to = (payload.requestedBy || '').trim();
       subject = '[MIKLENS] Formula Request ' + (payload.status || '') + ' – ' + (payload.formulaRequestId || '');
+    } else if (type === 'production_completed') {
+      eventTitle = 'Production Completed';
+      title = 'WIP / Production Completed';
+      color = STATUS_COLORS.SUCCESS;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Completed by', value: payload.completedBy || '' },
+        { label: 'Requested by', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
+        { label: 'Action', value: 'Ready for dispatch or next step.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersP = await getManagerAdminEmails(); to = managersP.length ? managersP.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Production Completed – ' + (payload.productName || '');
+    } else if (type === 'materials_issued') {
+      eventTitle = 'Materials Issued';
+      title = 'Materials Issued to Floor';
+      color = STATUS_COLORS.SUCCESS;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Issued by', value: payload.issuedBy || 'Store' },
+        { label: 'Action', value: 'Items issued to production floor. Inventory deducted.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersM = await getManagerAdminEmails(); to = managersM.length ? managersM.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Materials Issued – Production Started';
+    } else if (type === 'correction_requested') {
+      eventTitle = 'Correction Requested';
+      title = 'Adjustment Needed';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Requested by', value: (payload.requestedBy || '') + (payload.requestedByEmail ? ' (' + payload.requestedByEmail + ')' : '') },
+        { label: 'Reason', value: payload.summary || 'Ingredient correction requested' },
+        { label: 'Action', value: 'Check "Pending Manager Approval" and re-approve or reject.' }
+      ];
+      var managersCorr = await getManagerAdminEmails();
+      to = managersCorr.length ? managersCorr.join(',') : '';
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Correction Requested';
     } else {
       eventTitle = type.replace(/_/g, ' ');
       details = [{ label: 'Type', value: type }, { label: 'Data', value: JSON.stringify(payload) }];
@@ -171,7 +225,8 @@
     }
     if (!to) return null;
     var html = buildHtml(reqId, eventTitle, title, details, color, backendConfig.APP_URL);
-    return { to: to, subject: subject, html: html };
+    var cc = (type === 'approval_needed' && ccApproval) ? ccApproval : '';
+    return { to: to, subject: subject, html: html, cc: cc || '' };
   }
 
   function sendEmailViaAppsScript(payload) {
@@ -192,8 +247,9 @@
         subject: payload.subject || '',
         html: payload.html || ''
       };
+      if (payload.cc && String(payload.cc).trim()) data.cc = String(payload.cc).trim();
       var payloadStr = JSON.stringify(data);
-      /* Use form POST in iframe only - sendBeacon triggers CORS preflight and is blocked by Apps Script */
+      /* Form POST in iframe. Email sends; 403 in console is from iframe loading script response – harmless. */
       var iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
       iframe.name = 'appsScriptEmail_' + Date.now();
@@ -215,6 +271,38 @@
     } catch (e) {
       console.warn('Apps Script email failed', e);
     }
+  }
+
+  /** Log that this employee submitted a request (for reminder: only remind those who have not requested in 2 days). */
+  function logRequestToReminderSheet(email, name) {
+    var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
+    var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
+    if (!url || !secret || !email) return;
+    try {
+      var payloadStr = JSON.stringify({
+        secret: secret,
+        action: 'log_request',
+        email: String(email).toLowerCase().trim(),
+        name: String(name || '').trim()
+      });
+      var iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
+      iframe.name = 'appsScriptLog_' + Date.now();
+      document.body.appendChild(iframe);
+      var form = document.createElement('form');
+      form.action = url;
+      form.method = 'POST';
+      form.target = iframe.name;
+      var input = document.createElement('input');
+      input.name = 'payload';
+      input.value = payloadStr;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      setTimeout(function () {
+        try { document.body.removeChild(form); document.body.removeChild(iframe); } catch (e) {}
+      }, 2000);
+    } catch (e) {}
   }
 
   /** Optional: push to NotificationQueue for in-app notifications; if Apps Script URL is set, also send email for free. */
@@ -765,7 +853,17 @@
       PartialIssuedQty: 0
     };
     await docRef.set(payload);
-    await pushNotificationQueue('approval_needed', { requestId: newId, managerEmail: (payload.ManagerEmail || '').toString().trim(), productName: payload.ProductName || '' });
+    await pushNotificationQueue('approval_needed', {
+      requestId: newId,
+      managerEmail: (payload.ManagerEmail || '').toString().trim(),
+      productName: payload.ProductName || '',
+      requesterName: payload.EmployeeName || '',
+      requesterEmail: payload.EmployeeEm || '',
+      requestedQty: payload.RequestedQty,
+      unit: payload.Unit || '',
+      requestedAt: payload.CreatedDate || new Date().toISOString()
+    });
+    logRequestToReminderSheet(payload.EmployeeEm || '', payload.EmployeeName || '');
     return ok({ requestId: newId });
   }
 
@@ -814,6 +912,19 @@
     if (Object.keys(updates).length) {
       await docRef.update(updates);
       await auditLog('requisition_stage', params.user || params.email || 'user', { requestId: id, stageAction: params.stageAction || params.stage, newStatus: updates.Status });
+      if (updates.Status === 'ISSUED') {
+        var d = snap.data();
+        try {
+          pushNotificationQueue('materials_issued', {
+            requestId: id,
+            requesterEmail: (d.EmployeeEm || d.requesterEmail || '').trim(),
+            productName: d.ProductName || d.productName || '',
+            quantity: d.RequestedQty != null ? d.RequestedQty : d.quantity,
+            unit: d.Unit || d.unit || '',
+            issuedBy: params.user || params.email || 'Store'
+          });
+        } catch (e) { console.warn('materials_issued email:', e); }
+      }
     }
     return ok({ newStatus: updates.Status });
   }
@@ -881,6 +992,18 @@
       var resSnap = await resRef.get();
       if (resSnap.exists) {
         await resRef.update({ status: action === 'APPROVED' ? 'consumed' : 'released', updatedAt: new Date().toISOString() });
+      }
+      if (action === 'APPROVED' && status === 'ISSUED') {
+        try {
+          pushNotificationQueue('materials_issued', {
+            requestId: id,
+            requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
+            productName: data.ProductName || data.productName || '',
+            quantity: data.RequestedQty != null ? data.RequestedQty : data.quantity,
+            unit: data.Unit || data.unit || '',
+            issuedBy: params.user || params.email || 'Manager'
+          });
+        } catch (e) { console.warn('materials_issued email:', e); }
       }
     } else if (action === 'APPROVED') {
       // Manager approved first – reserve stock until Store issues
@@ -1289,6 +1412,7 @@
     var ref = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
     var snap = await ref.get();
     if (!snap.exists) return fail(new Error('Request not found'));
+    var data = snap.data();
     var corrections = params.corrections || params.summary || '[]';
     if (typeof corrections !== 'string') corrections = JSON.stringify(corrections);
     await ref.update({
@@ -1296,6 +1420,15 @@
       CurrentStage: 'Awaiting Manager Re-approval',
       Corrections: corrections
     });
+    try {
+      pushNotificationQueue('correction_requested', {
+        requestId: id,
+        productName: data.ProductName || data.productName || '',
+        requestedBy: data.EmployeeName || data.requesterName || params.user || '',
+        requestedByEmail: data.EmployeeEm || data.requesterEmail || '',
+        summary: (typeof params.summary === 'string' ? params.summary : '') || 'Ingredient correction requested'
+      });
+    } catch (e) { console.warn('correction_requested email:', e); }
     return ok({});
   }
 
@@ -1330,6 +1463,15 @@
     } else if (action === 'COMPLETE') {
       updates.Status = 'COMPLETED';
       updates.CurrentStage = 'Production Completed';
+      await pushNotificationQueue('production_completed', {
+        requestId: id,
+        requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
+        requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
+        productName: reqData.ProductName || '',
+        quantity: reqData.RequestedQty != null ? reqData.RequestedQty : reqData.quantity,
+        unit: reqData.Unit || '',
+        completedBy: userEmail || ''
+      });
     } else if (action === 'CANCEL') {
       updates.Status = 'CANCELLED';
       updates.CurrentStage = 'Cancelled';
@@ -1547,6 +1689,7 @@
         requestedByName: p.name || '',
         formulaBasis: p.formulaBasis || ''
       });
+      logRequestToReminderSheet(p.email || '', p.name || '');
       return ok({ id: id });
     },
     get_formula_requests: async function (p) {
