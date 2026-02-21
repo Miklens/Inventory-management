@@ -14,6 +14,35 @@
     return Object.assign({ result: 'success' }, data);
   }
 
+  async function auditLog(action, user, details) {
+    if (!db) return;
+    try {
+      await db.collection('AuditLog').add({
+        action: String(action),
+        user: String(user || 'system'),
+        timestamp: new Date().toISOString(),
+        details: details && typeof details === 'object' ? details : { note: String(details || '') }
+      });
+    } catch (e) {
+      console.warn('AuditLog write failed', e);
+    }
+  }
+
+  /** Optional: push to NotificationQueue for email (Cloud Function can listen and send). */
+  async function pushNotificationQueue(type, data) {
+    if (!db) return;
+    try {
+      await db.collection('NotificationQueue').add({
+        type: String(type),
+        createdAt: new Date().toISOString(),
+        sent: false,
+        data: data && typeof data === 'object' ? data : {}
+      });
+    } catch (e) {
+      console.warn('NotificationQueue write failed', e);
+    }
+  }
+
   async function sha256(str) {
     var buf = new TextEncoder().encode(str);
     var hash = await crypto.subtle.digest('SHA-256', buf);
@@ -65,18 +94,28 @@
     return { status: 'success', result: 'success', data: payload, version: version };
   }
 
-  async function saveInventory(payload) {
+  async function saveInventory(payload, baseVersionParam) {
     var dataString = (payload && payload.data) ? JSON.stringify(payload) : (typeof payload === 'string' ? payload : JSON.stringify(payload));
     var parsed = null;
     try { parsed = typeof dataString === 'string' ? JSON.parse(dataString) : dataString; } catch (e) { return fail(e); }
     var dataObj = (parsed && parsed.data && parsed.data.inventory) ? parsed.data : parsed;
+    var baseVersion = (baseVersionParam !== undefined && baseVersionParam !== null && baseVersionParam !== '') ? String(baseVersionParam) : ((payload && payload.baseVersion !== undefined && payload.baseVersion !== null) ? String(payload.baseVersion) : null);
+    if (baseVersion !== null && baseVersion !== '') {
+      var currentSnap = await db.collection('Database').doc('latest').get();
+      if (currentSnap.exists) {
+        var currentId = (currentSnap.data().latestId || '').toString();
+        if (currentId !== '' && currentId !== baseVersion) {
+          return { result: 'error', error: 'Data was changed by someone else. Refresh to get the latest, then try again.', code: 'CONFLICT', serverVersion: currentId };
+        }
+      }
+    }
     var id = Date.now().toString();
     await db.collection('Database').doc('latest').set({
       data: dataObj || parsed,
       latestId: id,
       exportedAt: new Date().toISOString()
     });
-    return { status: 'success' };
+    return { status: 'success', result: 'success', version: id };
   }
 
   async function getCollectionArray(collName) {
@@ -156,6 +195,106 @@
       items: items,
       updatedAt: new Date().toISOString()
     });
+  }
+
+  /** Deduct requisition materials from Database/latest inventory. Used when issue is completed (direct ISSUE or Manager approves after Store issued). */
+  async function deductInventoryForRequisition(requestId, data) {
+    var latestRef = db.collection('Database').doc('latest');
+    var snap = await latestRef.get();
+    if (!snap.exists) return { result: 'error', error: 'No inventory data. Add stock in Main Inventory first.', code: 'NO_INVENTORY' };
+    var d = snap.data();
+    var currentVersion = (d.latestId || '').toString();
+    var payload = (d.data != null) ? d.data : d;
+    var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    if (!inv || typeof inv !== 'object') return { result: 'error', error: 'Inventory structure not found.', code: 'NO_INVENTORY' };
+
+    var built = buildReservationItemsFromRequisition(data);
+    var categories = { rawMaterials: built.rawMaterials || [], packingMaterials: built.packingMaterials || [], labels: built.labels || [] };
+    var list = (categories.rawMaterials || []).concat(categories.packingMaterials || []).concat(categories.labels || []);
+
+    function findAndDeduct(arr, itemId, itemName, qty) {
+      var remaining = parseFloat(qty) || 0;
+      if (!arr || !Array.isArray(arr)) return remaining;
+      var idStr = (itemId != null ? String(itemId) : '').trim();
+      var nameStr = (itemName || '').toString().trim();
+      for (var i = 0; i < arr.length && remaining > 0; i++) {
+        var item = arr[i];
+        var match = (idStr && (String(item.id || '') === idStr || String(item.itemId || '') === idStr)) ||
+          (nameStr && (String(item.name || '') === nameStr || String(item.itemName || '') === nameStr));
+        if (!match) continue;
+        var current = parseFloat(item.quantity || item.qty || 0) || 0;
+        var deduct = Math.min(remaining, current);
+        item.quantity = item.qty = Math.max(0, current - deduct);
+        remaining -= deduct;
+      }
+      return remaining;
+    }
+
+    var nowIso = new Date().toISOString();
+    var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
+    if (!Array.isArray(payload.transactions)) payload.transactions = [];
+
+    for (var c = 0; c < list.length; c++) {
+      var ent = list[c];
+      var cat = (ent.category || 'rawMaterials').toString();
+      var arr = inv[cat];
+      var left = findAndDeduct(arr, ent.itemId, ent.itemName, ent.quantity);
+      if (left > 0) {
+        await auditLog('requisition_issue_deduction_shortfall', 'system', { requestId: requestId, itemName: ent.itemName || ent.itemId, shortfall: left });
+      }
+      var deducted = (parseFloat(ent.quantity) || 0) - left;
+      if (deducted > 0) {
+        payload.transactions.push({
+          id: Date.now().toString() + '-' + c,
+          itemId: ent.itemId || ent.itemName,
+          itemName: ent.itemName || ent.itemId,
+          category: cat,
+          type: 'requisition-issue',
+          quantity: -deducted,
+          date: dateStr,
+          requestId: requestId
+        });
+      }
+    }
+
+    var saveResult = await saveInventory(payload, currentVersion);
+    if (saveResult.result === 'error' && saveResult.code === 'CONFLICT') {
+      return { result: 'error', error: saveResult.error || 'Inventory was changed by someone else. Ask them to sync, then try Issue again.', code: 'CONFLICT', serverVersion: saveResult.serverVersion };
+    }
+    if (saveResult.result !== 'success' && saveResult.status !== 'success') {
+      return { result: 'error', error: (saveResult.error || 'Deduction failed') };
+    }
+    await auditLog('requisition_issue_deduction', 'system', { requestId: requestId, note: 'Inventory deducted for issue' });
+    return { result: 'success' };
+  }
+
+  /** Release reservations older than X hours (optional auto-release). Resets requisition to Awaiting Material Issue so Store can re-issue. */
+  async function releaseExpiredReservations(params) {
+    var hours = parseFloat(params.hours || params.hoursLimit || 48, 10) || 48;
+    var cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    var snap = await db.collection('RequisitionReservations').get();
+    var released = [];
+    for (var i = 0; i < snap.docs.length; i++) {
+      var d = snap.docs[i];
+      var doc = d.data();
+      if ((doc.status || '').toLowerCase() !== 'reserved') continue;
+      var updatedAt = (doc.updatedAt || '').toString();
+      if (updatedAt >= cutoff) continue;
+      var requestId = doc.requestId || d.id.replace(/_/g, '/');
+      await d.ref.update({ status: 'released', updatedAt: new Date().toISOString() });
+      var reqRef = db.collection('Requisitions_V2').doc(String(requestId).replace(/\//g, '_'));
+      var reqSnap = await reqRef.get();
+      if (reqSnap.exists) {
+        await reqRef.update({
+          Status: 'APPROVED',
+          CurrentStage: 'Awaiting Material Issue (reservation expired – re-issue required)'
+        });
+      }
+      released.push(requestId);
+      await auditLog('reservation_timeout_released', 'system', { requestId: requestId, hours: hours });
+      await pushNotificationQueue('reservation_released', { requestId: requestId, hours: hours });
+    }
+    return ok({ released: released, count: released.length });
   }
 
   async function getRequisitionReservedTotals() {
@@ -359,17 +498,31 @@
 
   async function getStageCounts() {
     var all = await getCollectionArray('Requisitions_V2');
-    var counts = { PENDING_ISSUE: 0, WIP: 0, DISPATCH: 0, PENDING_RECORD: 0, PENDING_APPROVALS: 0, PARTIAL_ISSUE: 0, PENDING_DISPATCH_APPROVALS: 0, FORMULA_REQUESTS: 0 };
+    var counts = { PENDING_ISSUE: 0, WIP: 0, DISPATCH: 0, PENDING_RECORD: 0, PENDING_APPROVALS: 0, PARTIAL_ISSUE: 0, PENDING_DISPATCH_APPROVALS: 0, FORMULA_REQUESTS: 0, OVERDUE: 0, TODAY_ISSUED: 0 };
+    var now = Date.now();
+    var oneDayMs = 24 * 60 * 60 * 1000;
+    var overdueThresholdMs = 3 * oneDayMs; // 3 days
+    var todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    var todayStartMs = todayStart.getTime();
     all.forEach(function (r) {
       var status = (r.Status || r.status || '').toUpperCase();
       var cur = (r.CurrentStage || r.currentStage || '').toUpperCase();
-      if (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) counts.PENDING_APPROVALS++;
-      if (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0) counts.PENDING_APPROVALS++;
-      if (cur.indexOf('AWAITING MATERIAL ISSUE') >= 0 || cur.indexOf('PENDING STORE') >= 0 || (status === 'APPROVED' && cur.indexOf('AWAITING') >= 0) || status === 'PARTIALLY_ISSUED') counts.PENDING_ISSUE++;
+      var created = r.CreatedDate || r.date || '';
+      var createdMs = created ? new Date(created).getTime() : 0;
+      var isPendingApproval = (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) || (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0);
+      var isPendingIssue = cur.indexOf('AWAITING MATERIAL ISSUE') >= 0 || cur.indexOf('PENDING STORE') >= 0 || (status === 'APPROVED' && cur.indexOf('AWAITING') >= 0) || status === 'PARTIALLY_ISSUED';
+      if (isPendingApproval) counts.PENDING_APPROVALS++;
+      if (isPendingIssue) counts.PENDING_ISSUE++;
       if (cur.indexOf('MANUFACTURING') >= 0 || cur.indexOf('WIP') >= 0 || cur === 'PAUSED') counts.WIP++;
       if (cur.indexOf('AWAITING DISPATCH') >= 0 || status === 'PRODUCED') counts.DISPATCH++;
       if (cur.indexOf('AWAITING PRODUCTION RECORDING') >= 0) counts.PENDING_RECORD++;
       if (status === 'PARTIALLY_ISSUED') counts.PARTIAL_ISSUE++;
+      if ((isPendingApproval || isPendingIssue) && createdMs && (now - createdMs > overdueThresholdMs)) counts.OVERDUE++;
+      if (status === 'ISSUED' && (r.IssuedAt || r.UpdatedDate)) {
+        var upd = new Date(r.IssuedAt || r.UpdatedDate).getTime();
+        if (upd >= todayStartMs) counts.TODAY_ISSUED++;
+      }
     });
     var dispSnap = await db.collection('RequisitionDispatches').get();
     dispSnap.forEach(function (d) {
@@ -411,6 +564,7 @@
       PartialIssuedQty: 0
     };
     await docRef.set(payload);
+    await pushNotificationQueue('approval_needed', { requestId: newId, managerEmail: (payload.ManagerEmail || '').toString().trim(), productName: payload.ProductName || '' });
     return ok({ requestId: newId });
   }
 
@@ -432,9 +586,19 @@
         updates.CurrentStage = 'Awaiting Manager Approval (Store Issued)';
         try { await upsertRequisitionReservation(id, data, 'reserved'); } catch (e) { /* non-fatal */ }
       } else {
-        // Option A: Manager already approved – move to WIP (deduction at issue or already done)
+        // Option A: Manager already approved – deduct from inventory and move to WIP
+        var deductResult = await deductInventoryForRequisition(id, data);
+        if (deductResult.result !== 'success') {
+          return deductResult;
+        }
         updates.Status = 'ISSUED';
         updates.CurrentStage = 'Material Issued / WIP';
+        updates.IssuedAt = new Date().toISOString();
+        var resRef = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
+        var resSnap = await resRef.get();
+        if (resSnap.exists) {
+          await resRef.update({ status: 'consumed', updatedAt: new Date().toISOString() });
+        }
       }
     } else if (stageAction === 'RECORD') {
       updates.Status = 'ISSUED';
@@ -446,7 +610,10 @@
     }
     if (params.stage) updates.CurrentStage = params.stage;
     if (params.status) updates.Status = params.status;
-    if (Object.keys(updates).length) await docRef.update(updates);
+    if (Object.keys(updates).length) {
+      await docRef.update(updates);
+      await auditLog('requisition_stage', params.user || params.email || 'user', { requestId: id, stageAction: params.stageAction || params.stage, newStatus: updates.Status });
+    }
     return ok({ newStatus: updates.Status });
   }
 
@@ -499,14 +666,26 @@
     }
     if (action === 'REJECTED') stage = 'Rejected';
     if (action === 'ON_HOLD') stage = 'On Hold';
-    await docRef.update({ Status: status, CurrentStage: stage });
+    var updatePayload = { Status: status, CurrentStage: stage };
+    if (status === 'ISSUED') updatePayload.IssuedAt = new Date().toISOString();
+    if (currentStatus === 'ISSUED_PENDING_APPROVAL' && action === 'APPROVED') {
+      var deductResult = await deductInventoryForRequisition(id, data);
+      if (deductResult.result !== 'success') {
+        return deductResult;
+      }
+    }
+    await docRef.update(updatePayload);
     if (currentStatus === 'ISSUED_PENDING_APPROVAL') {
       var resRef = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
       var resSnap = await resRef.get();
       if (resSnap.exists) {
         await resRef.update({ status: action === 'APPROVED' ? 'consumed' : 'released', updatedAt: new Date().toISOString() });
       }
+    } else if (action === 'APPROVED') {
+      // Manager approved first – reserve stock until Store issues
+      try { await upsertRequisitionReservation(id, data, 'reserved'); } catch (e) { /* non-fatal */ }
     }
+    await auditLog('requisition_' + (action === 'APPROVED' ? 'approve' : action === 'REJECTED' ? 'reject' : 'hold'), params.user || params.email || 'user', { requestId: id, action: action });
     return ok({});
   }
 
@@ -847,6 +1026,14 @@
       MainInvSynced: 'N',
       Remarks: remarks
     });
+    await pushNotificationQueue('dispatch_approval_required', {
+      dispatchId: dispatchId,
+      requestId: requestId,
+      productName: productName,
+      quantity: qty,
+      unit: unit || reqData.Unit || '',
+      requestedBy: requestedBy
+    });
     return ok({ dispatchId: dispatchId, message: 'Dispatch request submitted for manager approval' });
   }
 
@@ -867,6 +1054,20 @@
       ApprovedBy: approvedBy,
       ApprovedAt: new Date().toISOString(),
       MainInvSynced: 'Y'
+    });
+    var requestId = d.RequestID || '';
+    var requesterEmail = '';
+    if (requestId) {
+      var reqSnap = await db.collection('Requisitions_V2').doc(String(requestId).replace(/\//g, '_')).get();
+      if (reqSnap.exists) requesterEmail = (reqSnap.data().EmployeeEm || reqSnap.data().requesterEmail || '').trim();
+    }
+    await pushNotificationQueue('dispatch_approved', {
+      requestId: requestId,
+      requesterEmail: requesterEmail,
+      productName: d.ProductName || '',
+      quantity: d.Quantity,
+      unit: d.Unit || '',
+      approvedBy: approvedBy
     });
     return ok({ message: 'Dispatch approved' });
   }
@@ -1063,7 +1264,11 @@
       if (typeof payload === 'string') {
         try { payload = JSON.parse(payload); } catch (e) { return fail(e); }
       }
-      return saveInventory(payload);
+      var result = await saveInventory(payload, p.baseVersion);
+      if (result && (result.status === 'success' || result.result === 'success')) {
+        await auditLog('inventory_sync', p.user || p.userEmail || 'inventory_app', { version: result.version || '' });
+      }
+      return result;
     },
     get_form_data: getFormData,
     get_form_products: async function () { var fd = await getFormData(); return fd.result === 'success' ? ok({ products: fd.products }) : fd; },
@@ -1075,6 +1280,7 @@
     get_my_requests: getMyRequests,
     get_pending_approvals: getPendingApprovals,
     get_requisition_reserved_totals: getRequisitionReservedTotals,
+    release_expired_reservations: releaseExpiredReservations,
     get_material_queue: getMaterialQueue,
     get_requisition_queue: getMaterialQueue,
     get_wip_batches: getWipBatches,
@@ -1134,6 +1340,12 @@
         status: 'Pending',
         createdAt: new Date().toISOString()
       });
+      await pushNotificationQueue('formula_request_submitted', {
+        formulaRequestId: id,
+        requestedBy: p.email || '',
+        requestedByName: p.name || '',
+        formulaBasis: p.formulaBasis || ''
+      });
       return ok({ id: id });
     },
     get_formula_requests: async function (p) {
@@ -1151,11 +1363,18 @@
       var ref = db.collection('FormulaRequests').doc(String(p.id).replace(/\//g, '_'));
       var snap = await ref.get();
       if (!snap.exists) return fail(new Error('Request not found'));
+      var existing = snap.data();
       await ref.update({
         status: p.status || 'Added',
         resolvedBy: p.user || '',
         notes: p.notes || '',
         resolvedAt: new Date().toISOString()
+      });
+      await pushNotificationQueue('formula_request_resolved', {
+        formulaRequestId: p.id,
+        status: p.status || 'Added',
+        resolvedBy: p.user || '',
+        requestedBy: existing.email || ''
       });
       return ok({});
     },
