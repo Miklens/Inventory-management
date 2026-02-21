@@ -829,30 +829,34 @@
   async function submitRequest(params) {
     var newId = 'REQ-' + Date.now();
     var docRef = db.collection('Requisitions_V2').doc(newId);
-    var type = params.type || 'Production';
+    var type = (params.type || 'Production').toString();
     var email = String(params.requesterEmail || params.employeeEmail || '').toLowerCase().trim();
     var name = (params.requesterName || params.employeeName || '').trim();
+    var requestedQty = params.requestedQty != null ? Number(params.requestedQty) : (params.quantity != null ? Number(params.quantity) : 0);
+    if (typeof requestedQty !== 'number' || isNaN(requestedQty)) requestedQty = 0;
     var payload = {
       RequestID: newId,
       Type: type,
       Status: 'SUBMITTED',
       EmployeeEm: email,
       EmployeeName: name,
-      ProductName: params.productName || '',
-      RequestedQty: params.requestedQty != null ? params.requestedQty : params.quantity,
+      ProductName: String(params.productName || ''),
+      RequestedQty: requestedQty,
       Formulaltems: params.ingredients ? JSON.stringify(params.ingredients) : (params.formulaItems || '[]'),
       Additionalltems: params.packing ? JSON.stringify(params.packing) : (params.packingItems || '[]'),
-      ManagerEmail: (params.managerEmail || '').toString().toLowerCase().trim(),
+      ManagerEmail: String(params.managerEmail || '').toLowerCase().trim(),
       CreatedDate: new Date().toISOString(),
-      Unit: params.unit || '',
+      Unit: String(params.unit || ''),
       Labels: params.labels ? JSON.stringify(params.labels) : '[]',
-      Notes: params.notes || params.remarks || '',
-      CurrentStage: 'Pending Manager Approval',
-      AdditionalItems: params.additionalItems ? JSON.stringify(params.additionalItems) : '[]',
+      Notes: String(params.notes || params.remarks || ''),
+      CurrentStage: type.toLowerCase() === 'research' ? 'Pending Store & Manager' : 'Pending Manager Approval',
+      AdditionalItems: params.additionalItems ? JSON.stringify(params.additionalItems) : (params.items || '[]'),
       Corrections: '[]',
       BatchID: '',
       PartialIssuedQty: 0
     };
+    if (params.purpose != null && params.purpose !== '') payload.Notes = String(params.purpose).trim() + (payload.Notes ? '\n' + payload.Notes : '');
+    for (var k in payload) { if (payload[k] === undefined) payload[k] = null; }
     await docRef.set(payload);
     await pushNotificationQueue('approval_needed', {
       requestId: newId,
