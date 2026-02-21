@@ -1563,8 +1563,11 @@
                             if (typeof window.loginAs === 'function') window.loginAs(roleSlug, true);
                             closeModal('loginModal');
                             if (typeof window.updateLoginButton === 'function') window.updateLoginButton();
-                            if (typeof showAlert === 'function') showAlert('Welcome, ' + (user.name || user.email) + '!', 'Logged in');
-                            if (typeof renderDashboard === 'function') renderDashboard();
+                            (async function () {
+                                try { if (typeof fetchFromCloud === 'function') await fetchFromCloud(); } catch (e) { }
+                                if (typeof renderDashboard === 'function') renderDashboard();
+                                if (typeof showAlert === 'function') showAlert('Welcome, ' + (user.name || user.email) + '!', 'Logged in');
+                            })();
                         } else {
                             if (errEl) { errEl.textContent = (data && data.error) ? data.error : 'Invalid email or password.'; errEl.classList.remove('hidden'); }
                         }
@@ -1575,9 +1578,13 @@
                 };
                 window.inventoryLogout = function () {
                     sessionStorage.removeItem('INVENTORY_USER');
+                    if (window._inventoryUseFirebase) {
+                        appState = { inventory: { rawMaterials: [], packingMaterials: [], labels: [], finishedGoods: [] }, transactions: [], formulas: [], suppliers: [], customers: [], activeProduction: [], savedCalculations: [], pendingServerActions: [] };
+                    }
                     if (typeof window.loginAs === 'function') window.loginAs('viewer', true);
                     if (document.getElementById('current-user-name')) document.getElementById('current-user-name').textContent = 'Guest';
                     if (typeof window.updateLoginButton === 'function') window.updateLoginButton();
+                    if (window._inventoryUseFirebase && typeof renderCurrentView === 'function') renderCurrentView();
                     window.openLoginModal();
                 };
                 window.updateLoginButton = function () {
@@ -2115,15 +2122,18 @@
                 };
 
                 function loadInitialData() {
-                    // ALWAYS load local data first so the user sees something immediately
                     loadLocalData();
-
-                    // Then, if connected (GAS URL or Firebase), DOWNLOAD from cloud (but never auto-upload on startup)
+                    // When using Firebase, do not load or show any data until user is logged in
+                    if (useFirebase && !sessionStorage.getItem('INVENTORY_USER')) {
+                        appState = { inventory: { rawMaterials: [], packingMaterials: [], labels: [], finishedGoods: [] }, transactions: [], formulas: [], suppliers: [], customers: [], activeProduction: [], savedCalculations: [], pendingServerActions: [] };
+                        if (typeof updateSyncStatus === 'function') updateSyncStatus('', 'Log in to view data');
+                        if (typeof renderCurrentView === 'function') renderCurrentView();
+                        return;
+                    }
                     if (cloudApiUrl || useFirebase) {
-                        fetchFromCloud(); // This only DOWNLOADS, never uploads
+                        fetchFromCloud();
                         if (autoRefreshEnabled) startAutoRefresh();
                     }
-                    // NOTE: We never auto-upload on startup to prevent accidental overwrites from cached data
                 }
 
                 // DOMContentLoaded listener for auto-sync toggle defined above (line ~1002)
@@ -2316,10 +2326,14 @@
 
 
                 function loadInitialData() {
-                        // ALWAYS load local data first so the user sees something immediately
                         loadLocalData();
-
-                        // Then, if connected (GAS URL or Firebase), download from cloud
+                        // When using Firebase, do not load or show any data until user is logged in
+                        if (useFirebase && !sessionStorage.getItem('INVENTORY_USER')) {
+                            appState = { inventory: { rawMaterials: [], packingMaterials: [], labels: [], finishedGoods: [] }, transactions: [], formulas: [], suppliers: [], customers: [], activeProduction: [], savedCalculations: [], pendingServerActions: [] };
+                            if (typeof updateSyncStatus === 'function') updateSyncStatus('', 'Log in to view data');
+                            if (typeof renderCurrentView === 'function') renderCurrentView();
+                            return;
+                        }
                         if (cloudApiUrl || useFirebase) {
                             fetchFromCloud();
                             if (autoRefreshEnabled) startAutoRefresh();
