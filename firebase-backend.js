@@ -73,7 +73,7 @@
     var emails = [];
     snap.forEach(function (doc) {
       var d = doc.data();
-      var role = (d.Role || d.role || '').toLowerCase();
+      var role = (d.Role || d.role || '').toLowerCase().trim();
       var email = (d.Email || d.email || '').trim();
       if (email && (role === 'manager' || role === 'admin')) emails.push(email);
     });
@@ -177,7 +177,14 @@
   function sendEmailViaAppsScript(payload) {
     var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
     var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
-    if (!url || !secret || !payload || !payload.to) return;
+    if (!url || !secret) {
+      console.warn('Email skipped: APP_SCRIPT_EMAIL_URL or APP_SCRIPT_EMAIL_SECRET not set in config.');
+      return;
+    }
+    if (!payload || !payload.to) {
+      console.warn('Email skipped: no recipient (to). Check Manager Email on the requisition or add a user with Role Manager/Admin in Firestore Users.');
+      return;
+    }
     try {
       var data = {
         secret: secret,
@@ -186,6 +193,13 @@
         html: payload.html || ''
       };
       var payloadStr = JSON.stringify(data);
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        var blob = new Blob([payloadStr], { type: 'application/json' });
+        if (navigator.sendBeacon(url, blob)) {
+          console.log('Email sent (beacon) to:', payload.to);
+          return;
+        }
+      }
       var iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
       iframe.name = 'appsScriptEmail_' + Date.now();
@@ -200,6 +214,7 @@
       form.appendChild(input);
       document.body.appendChild(form);
       form.submit();
+      console.log('Email sent (form) to:', payload.to);
       setTimeout(function () {
         try { document.body.removeChild(form); document.body.removeChild(iframe); } catch (e) {}
       }, 3000);
@@ -221,7 +236,11 @@
       if (backendConfig.APP_SCRIPT_EMAIL_URL && backendConfig.APP_SCRIPT_EMAIL_SECRET) {
         try {
           var emailPayload = await buildEmailContent(type, data);
-          if (emailPayload && emailPayload.to) sendEmailViaAppsScript(emailPayload);
+          if (emailPayload && emailPayload.to) {
+            sendEmailViaAppsScript(emailPayload);
+          } else if (!emailPayload || !emailPayload.to) {
+            console.warn('Email skipped: no recipient for type=', type, '- set Manager Email on the request or add Manager/Admin users in Firestore.');
+          }
         } catch (e) {
           console.warn('Apps Script email failed', e);
         }
