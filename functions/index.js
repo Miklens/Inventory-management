@@ -25,7 +25,7 @@ function getConfig(key) {
 const STATUS_COLORS = { INFO: '#3b82f6', SUCCESS: '#10b981', ALERT: '#ef4444', WARNING: '#f59e0b' };
 
 function buildHtml(reqId, eventTitle, title, details, color, appUrl) {
-  const finalUrl = appUrl || 'https://miklensinventory.netlify.app';
+  const finalUrl = appUrl || 'https://miklens.github.io/Inventory-management';
   let detailsHtml = '';
   if (details && details.length > 0) {
     detailsHtml = '<div style="margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">' +
