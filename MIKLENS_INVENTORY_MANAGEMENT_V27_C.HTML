@@ -1898,7 +1898,7 @@
                         alert('Please connect to cloud first (or set Firebase in Settings)!');
                         return;
                     }
-                    syncToCloud();
+                    syncToCloud(true); // true = manual Sync Now, always upload
                 }
 
                 function saveState() {
@@ -1910,18 +1910,23 @@
                         console.error("Local save failed", error);
                     }
 
-                    // 2. Trigger Cloud Sync ONLY if auto-sync is enabled
+                    // 2. Trigger Cloud Sync ONLY if auto-sync is enabled (re-check when timer fires so turning OFF stops pending sync)
                     if ((cloudApiUrl || useFirebase) && autoSyncEnabled) {
                         updateSyncStatus('pending', 'Waiting to sync...');
                         if (saveTimeout) clearTimeout(saveTimeout);
-                        saveTimeout = setTimeout(syncToCloud, 2000); // Wait 2 seconds of inactivity
+                        saveTimeout = setTimeout(function () { if (autoSyncEnabled) syncToCloud(); }, 2000);
                     } else if ((cloudApiUrl || useFirebase) && !autoSyncEnabled) {
                         updateSyncStatus('pending', 'Saved locally (Auto-sync OFF)');
                     }
                 }
 
-                async function syncToCloud() {
+                async function syncToCloud(isManual) {
                     if (!cloudApiUrl && !useFirebase) return;
+                    // Entire app: upload only when Sync Now (isManual) or Auto-Sync is on
+                    if (!isManual && !autoSyncEnabled) {
+                        if (typeof updateSyncStatus === 'function') updateSyncStatus('', 'Saved locally (Auto-sync OFF)');
+                        return;
+                    }
 
                     // PHASE 14c: Process Pending Offline Actions First (Store & Forward) – GAS only; Firebase syncs via save_inventory below
                     if (!useFirebase && cloudApiUrl && appState.pendingServerActions && appState.pendingServerActions.length > 0) {
