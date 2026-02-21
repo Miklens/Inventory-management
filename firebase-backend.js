@@ -193,13 +193,7 @@
         html: payload.html || ''
       };
       var payloadStr = JSON.stringify(data);
-      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-        var blob = new Blob([payloadStr], { type: 'application/json' });
-        if (navigator.sendBeacon(url, blob)) {
-          console.log('Email sent (beacon) to:', payload.to);
-          return;
-        }
-      }
+      /* Use form POST in iframe only - sendBeacon triggers CORS preflight and is blocked by Apps Script */
       var iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
       iframe.name = 'appsScriptEmail_' + Date.now();
@@ -214,7 +208,7 @@
       form.appendChild(input);
       document.body.appendChild(form);
       form.submit();
-      console.log('Email sent (form) to:', payload.to);
+      console.log('Email sent (form POST) to:', payload.to);
       setTimeout(function () {
         try { document.body.removeChild(form); document.body.removeChild(iframe); } catch (e) {}
       }, 3000);
