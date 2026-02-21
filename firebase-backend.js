@@ -174,19 +174,35 @@
     return { to: to, subject: subject, html: html };
   }
 
-  async function sendEmailViaAppsScript(payload) {
+  function sendEmailViaAppsScript(payload) {
     var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
     var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
     if (!url || !secret || !payload || !payload.to) return;
     try {
-      var body = JSON.stringify({
+      var data = {
         secret: secret,
         to: payload.to,
         subject: payload.subject || '',
         html: payload.html || ''
-      });
-      var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
-      if (!res.ok) console.warn('Apps Script email returned', res.status);
+      };
+      var payloadStr = JSON.stringify(data);
+      var iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
+      iframe.name = 'appsScriptEmail_' + Date.now();
+      document.body.appendChild(iframe);
+      var form = document.createElement('form');
+      form.action = url;
+      form.method = 'POST';
+      form.target = iframe.name;
+      var input = document.createElement('input');
+      input.name = 'payload';
+      input.value = payloadStr;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      setTimeout(function () {
+        try { document.body.removeChild(form); document.body.removeChild(iframe); } catch (e) {}
+      }, 3000);
     } catch (e) {
       console.warn('Apps Script email failed', e);
     }
@@ -205,7 +221,7 @@
       if (backendConfig.APP_SCRIPT_EMAIL_URL && backendConfig.APP_SCRIPT_EMAIL_SECRET) {
         try {
           var emailPayload = await buildEmailContent(type, data);
-          if (emailPayload && emailPayload.to) await sendEmailViaAppsScript(emailPayload);
+          if (emailPayload && emailPayload.to) sendEmailViaAppsScript(emailPayload);
         } catch (e) {
           console.warn('Apps Script email failed', e);
         }
