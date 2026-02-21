@@ -5,6 +5,7 @@
 (function (global) {
   'use strict';
   var db = null;
+  var backendConfig = {};
 
   function fail(err) {
     return { result: 'error', error: (err && err.message) || String(err) };
@@ -28,7 +29,170 @@
     }
   }
 
-  /** Optional: push to NotificationQueue for email (Cloud Function can listen and send). */
+  var STATUS_COLORS = { INFO: '#3b82f6', SUCCESS: '#10b981', ALERT: '#ef4444', WARNING: '#f59e0b' };
+
+  function buildHtml(reqId, eventTitle, title, details, color, appUrl) {
+    var finalUrl = (appUrl || backendConfig.APP_URL || 'https://miklens.github.io/Inventory-management').trim();
+    var detailsHtml = '';
+    if (details && details.length > 0) {
+      detailsHtml = '<div style="margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">' +
+        '<table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px;">' +
+        '<thead style="background-color: #f9fafb;"><tr>' +
+        '<th style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; color: #6b7280; text-transform: uppercase; font-size: 10px;">Detail</th>' +
+        '<th style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; color: #6b7280; text-transform: uppercase; font-size: 10px;">Information</th></tr></thead><tbody>';
+      for (var i = 0; i < details.length; i++) {
+        var item = details[i];
+        var label = String(item.label || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        var value = String(item.value != null ? item.value : '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        detailsHtml += '<tr><td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #374151; font-weight: bold;">' + label + '</td>' +
+          '<td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #4b5563;">' + value + '</td></tr>';
+      }
+      detailsHtml += '</tbody></table></div>';
+    }
+    var safeReqId = String(reqId || '').replace(/</g, '&lt;');
+    var safeTitle = String(title || 'System Update').replace(/</g, '&lt;');
+    var safeEvent = String(eventTitle || '').replace(/</g, '&lt;');
+    return '<div style="background-color: #f3f4f6; padding: 20px; font-family: \'Segoe UI\', Arial, sans-serif;">' +
+      '<div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">' +
+      '<div style="background-color: ' + (color || STATUS_COLORS.INFO) + '; padding: 30px; text-align: center;">' +
+      '<div style="color: #ffffff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px;">Miklens Digital Requisition</div>' +
+      '<h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 900;">' + safeEvent + '</h1>' +
+      '<div style="color: rgba(255,255,255,0.8); font-size: 14px; margin-top: 5px; font-weight: bold;">' + safeTitle + '</div></div>' +
+      '<div style="padding: 30px;">' +
+      '<p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin-top: 0;">This is an automated notification regarding <b>#' + safeReqId + '</b>.</p>' +
+      detailsHtml +
+      '<div style="text-align: center; margin-top: 30px;">' +
+      '<a href="' + finalUrl + '" style="background-color: ' + (color || STATUS_COLORS.INFO) + '; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block;">Open Application</a></div>' +
+      '<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #f3f4f6; color: #9ca3af; font-size: 11px; text-align: center;">© ' + new Date().getFullYear() + ' Miklens Digital Inventory Sync • Automated Alert</div>' +
+      '</div></div></div>';
+  }
+
+  async function getManagerAdminEmails() {
+    if (!db) return [];
+    var snap = await db.collection('Users').get();
+    var emails = [];
+    snap.forEach(function (doc) {
+      var d = doc.data();
+      var role = (d.Role || d.role || '').toLowerCase();
+      var email = (d.Email || d.email || '').trim();
+      if (email && (role === 'manager' || role === 'admin')) emails.push(email);
+    });
+    return emails;
+  }
+
+  async function buildEmailContent(type, data) {
+    var payload = data && typeof data === 'object' ? data : {};
+    var reqId = payload.requestId || payload.formulaRequestId || payload.dispatchId || '';
+    var details = [];
+    var color = STATUS_COLORS.INFO;
+    var eventTitle = 'Notification';
+    var title = 'System Update';
+    var to = '';
+    var subject = '';
+
+    if (type === 'approval_needed') {
+      eventTitle = 'New Requisition Submitted';
+      title = 'New Requisition';
+      color = STATUS_COLORS.INFO;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Action', value: 'Please approve or reject in the app.' }
+      ];
+      to = (payload.managerEmail || '').trim();
+      if (!to) { var managers = await getManagerAdminEmails(); to = managers.length ? managers.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] New Requisition – Approval Required';
+    } else if (type === 'reservation_released') {
+      eventTitle = 'Reservation Released';
+      title = 'Reservation Expired';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Reason', value: 'Reservation timed out after ' + (payload.hours || 48) + ' hours.' },
+        { label: 'Action', value: 'Re-issue materials from Pending Issue if still needed.' }
+      ];
+      var managers0 = await getManagerAdminEmails();
+      to = managers0.length ? managers0.join(',') : '';
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Reservation Released – Re-issue if needed';
+    } else if (type === 'dispatch_approval_required') {
+      eventTitle = 'Dispatch Approval Required';
+      title = 'Dispatch Request';
+      color = STATUS_COLORS.INFO;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Requested by', value: payload.requestedBy || '' }
+      ];
+      var managers1 = await getManagerAdminEmails();
+      to = managers1.length ? managers1.join(',') : '';
+      subject = '[MIKLENS] Dispatch Approval Required – ' + (payload.productName || '');
+    } else if (type === 'dispatch_approved') {
+      eventTitle = 'Dispatch Approved';
+      title = 'Dispatch Approved';
+      color = STATUS_COLORS.SUCCESS;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Approved by', value: payload.approvedBy || '' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Dispatch Approved';
+    } else if (type === 'formula_request_submitted') {
+      eventTitle = 'New Formula Request';
+      title = 'Formula Request';
+      color = STATUS_COLORS.INFO;
+      details = [
+        { label: 'Request ID', value: payload.formulaRequestId || '' },
+        { label: 'Requested by', value: (payload.requestedByName || '') + ' (' + (payload.requestedBy || '') + ')' },
+        { label: 'Basis', value: payload.formulaBasis || '' }
+      ];
+      var managers2 = await getManagerAdminEmails();
+      to = managers2.length ? managers2.join(',') : '';
+      subject = '[MIKLENS] New Formula Request – ' + (payload.formulaRequestId || '');
+    } else if (type === 'formula_request_resolved') {
+      eventTitle = 'Formula Request Updated';
+      title = 'Formula Request ' + (payload.status || 'Resolved');
+      color = STATUS_COLORS.SUCCESS;
+      details = [
+        { label: 'Request ID', value: payload.formulaRequestId || '' },
+        { label: 'Status', value: payload.status || '' },
+        { label: 'Resolved by', value: payload.resolvedBy || '' }
+      ];
+      to = (payload.requestedBy || '').trim();
+      subject = '[MIKLENS] Formula Request ' + (payload.status || '') + ' – ' + (payload.formulaRequestId || '');
+    } else {
+      eventTitle = type.replace(/_/g, ' ');
+      details = [{ label: 'Type', value: type }, { label: 'Data', value: JSON.stringify(payload) }];
+      var managers3 = await getManagerAdminEmails();
+      to = managers3.length ? managers3.join(',') : '';
+      subject = '[MIKLENS] ' + eventTitle;
+    }
+    if (!to) return null;
+    var html = buildHtml(reqId, eventTitle, title, details, color, backendConfig.APP_URL);
+    return { to: to, subject: subject, html: html };
+  }
+
+  async function sendEmailViaAppsScript(payload) {
+    var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
+    var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
+    if (!url || !secret || !payload || !payload.to) return;
+    try {
+      var body = JSON.stringify({
+        secret: secret,
+        to: payload.to,
+        subject: payload.subject || '',
+        html: payload.html || ''
+      });
+      var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
+      if (!res.ok) console.warn('Apps Script email returned', res.status);
+    } catch (e) {
+      console.warn('Apps Script email failed', e);
+    }
+  }
+
+  /** Optional: push to NotificationQueue for in-app notifications; if Apps Script URL is set, also send email for free. */
   async function pushNotificationQueue(type, data) {
     if (!db) return;
     try {
@@ -38,6 +202,14 @@
         sent: false,
         data: data && typeof data === 'object' ? data : {}
       });
+      if (backendConfig.APP_SCRIPT_EMAIL_URL && backendConfig.APP_SCRIPT_EMAIL_SECRET) {
+        try {
+          var emailPayload = await buildEmailContent(type, data);
+          if (emailPayload && emailPayload.to) await sendEmailViaAppsScript(emailPayload);
+        } catch (e) {
+          console.warn('Apps Script email failed', e);
+        }
+      }
     } catch (e) {
       console.warn('NotificationQueue write failed', e);
     }
@@ -1403,6 +1575,7 @@
       return false;
     }
     try {
+      backendConfig = config && typeof config === 'object' ? config : {};
       var app = global.firebase.initializeApp(config);
       db = global.firebase.firestore();
       return true;
