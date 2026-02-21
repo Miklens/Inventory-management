@@ -15,6 +15,30 @@
     return Object.assign({ result: 'success' }, data);
   }
 
+  /** Firestore allows only specific types. Strip undefined, NaN, Infinity; coerce to safe values. */
+  function sanitizeForFirestore(val) {
+    if (val === undefined) return null;
+    if (val === null) return null;
+    if (typeof val === 'number') {
+      if (val !== val || val === Infinity || val === -Infinity) return 0;
+      return val;
+    }
+    if (typeof val === 'string' || typeof val === 'boolean') return val;
+    if (Array.isArray(val)) {
+      return val.map(function (item) { return sanitizeForFirestore(item); });
+    }
+    if (typeof val === 'object' && val !== null) {
+      var out = {};
+      for (var k in val) {
+        if (!Object.prototype.hasOwnProperty.call(val, k)) continue;
+        var key = String(k).indexOf('.') >= 0 ? String(k).replace(/\./g, '_') : k;
+        out[key] = sanitizeForFirestore(val[k]);
+      }
+      return out;
+    }
+    return null;
+  }
+
   async function auditLog(action, user, details) {
     if (!db) return;
     try {
@@ -834,6 +858,11 @@
     var name = (params.requesterName || params.employeeName || '').trim();
     var requestedQty = params.requestedQty != null ? Number(params.requestedQty) : (params.quantity != null ? Number(params.quantity) : 0);
     if (typeof requestedQty !== 'number' || isNaN(requestedQty)) requestedQty = 0;
+    var toJson = function (x) {
+      if (x == null) return '[]';
+      if (typeof x === 'string') return x;
+      try { return JSON.stringify(x); } catch (e) { return '[]'; }
+    };
     var payload = {
       RequestID: newId,
       Type: type,
@@ -842,22 +871,21 @@
       EmployeeName: name,
       ProductName: String(params.productName || ''),
       RequestedQty: requestedQty,
-      Formulaltems: params.ingredients ? JSON.stringify(params.ingredients) : (params.formulaItems || '[]'),
-      Additionalltems: params.packing ? JSON.stringify(params.packing) : (params.packingItems || '[]'),
+      Formulaltems: toJson(params.ingredients || params.formulaItems),
+      Additionalltems: toJson(params.packing || params.packingItems),
       ManagerEmail: String(params.managerEmail || '').toLowerCase().trim(),
       CreatedDate: new Date().toISOString(),
       Unit: String(params.unit || ''),
-      Labels: params.labels ? JSON.stringify(params.labels) : '[]',
+      Labels: toJson(params.labels),
       Notes: String(params.notes || params.remarks || ''),
       CurrentStage: type.toLowerCase() === 'research' ? 'Pending Store & Manager' : 'Pending Manager Approval',
-      AdditionalItems: params.additionalItems ? JSON.stringify(params.additionalItems) : (params.items || '[]'),
+      AdditionalItems: toJson(params.additionalItems || params.items),
       Corrections: '[]',
       BatchID: '',
       PartialIssuedQty: 0
     };
     if (params.purpose != null && params.purpose !== '') payload.Notes = String(params.purpose).trim() + (payload.Notes ? '\n' + payload.Notes : '');
-    for (var k in payload) { if (payload[k] === undefined) payload[k] = null; }
-    await docRef.set(payload);
+    await docRef.set(sanitizeForFirestore(payload));
     await pushNotificationQueue('approval_needed', {
       requestId: newId,
       managerEmail: (payload.ManagerEmail || '').toString().trim(),
