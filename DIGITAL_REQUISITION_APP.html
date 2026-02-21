@@ -546,6 +546,7 @@
                     currentUser = data.user;
                     currentUser.role = normalizeRole(currentUser.role);
                     localStorage.setItem('miklens_user', JSON.stringify(currentUser));
+                    localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
                     showApp();
                 } else {
                     document.getElementById('loginError').textContent = userFriendlyError(data.error) || 'Invalid credentials';
@@ -578,12 +579,18 @@
 
             initializePortal(currentUser.role);
 
+            // Release reservations older than 24h (optional auto-release) when using Firebase
+            if (typeof USE_FIREBASE !== 'undefined' && USE_FIREBASE && typeof callBackend === 'function') {
+                callBackend('release_expired_reservations', { hours: 48 }).catch(function () {});
+            }
+
             // Preload form data in background so Product Name dropdown is ready when user opens New Request
             loadFormDropdowns();
         }
 
         function logout() {
             localStorage.removeItem('miklens_user');
+            localStorage.removeItem('REQUISITION_LAST_ACTIVITY');
             currentUser = null;
 
             // Show login screen
@@ -598,6 +605,22 @@
             document.getElementById('loginForm').reset();
             document.getElementById('loginError').classList.add('hidden');
         }
+
+        var SESSION_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
+        function updateRequisitionSessionActivity() {
+            if (currentUser) localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
+        }
+        document.addEventListener('mousedown', updateRequisitionSessionActivity);
+        document.addEventListener('keydown', updateRequisitionSessionActivity);
+        setInterval(function () {
+            if (!currentUser) return;
+            var last = parseInt(localStorage.getItem('REQUISITION_LAST_ACTIVITY') || '0', 10);
+            if (!last) return;
+            if (Date.now() - last > SESSION_TIMEOUT_MS) {
+                logout();
+                showToast('Session expired after 8 hours of inactivity. Please log in again.', 'warning');
+            }
+        }, 60000);
 
         // ==========================================
         // SETTINGS MODAL
@@ -869,6 +892,7 @@
 
             // Manager and Admin have identical permissions. Operator role removed – treated as Manager.
             const managerAdminTabs = [
+                { id: 'dashboard', label: 'Dashboard', icon: '📊' },
                 { id: 'pending-approvals', label: 'Pending Approvals', icon: '⏳' },
                 { id: 'pending-issue', label: 'Pending Issue', icon: '📦' },
                 { id: 'pending-record', label: 'Pending Recording', icon: '💾' },
@@ -881,6 +905,7 @@
             ];
             const portals = {
                 'Store Incharge': [
+                    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
                     { id: 'pending-issue', label: 'Pending Issue', icon: '📦' },
                     { id: 'partial-issue', label: 'Partial / Incomplete', icon: '📋' },
                     { id: 'wip-management', label: 'WIP Monitor', icon: '⚙️' },
@@ -919,6 +944,7 @@
                 if (data.result !== 'success' || !data.counts) return;
                 const c = data.counts;
                 const map = {
+                    'dashboard': 0,
                     'pending-issue': c.PENDING_ISSUE || 0,
                     'partial-issue': c.PARTIAL_ISSUE || 0,
                     'wip-management': c.WIP || 0,
@@ -941,6 +967,11 @@
                         }
                     }
                 });
+                var pendingApprovals = c.PENDING_APPROVALS || 0;
+                var role = (currentUser && currentUser.role) ? String(currentUser.role).toLowerCase() : '';
+                if (pendingApprovals > 0 && (role.indexOf('manager') >= 0 || role.indexOf('admin') >= 0) && typeof showToast === 'function') {
+                    showToast('You have ' + pendingApprovals + ' request(s) waiting for approval.', 'info');
+                }
             } catch (e) { /* ignore */ }
         }
 
@@ -970,7 +1001,7 @@
         function setCachedView(viewId, html) {
             viewCache[viewId] = { html: html, ts: Date.now() };
         }
-        const CACHEABLE_VIEWS = ['my-requests','pending-approvals','all-requests','pending-issue','partial-issue','pending-record','wip-management','dispatch-queue','dispatch','issued-items','pending-dispatch-approvals','master_archive','formula-requests'];
+        const CACHEABLE_VIEWS = ['dashboard','my-requests','pending-approvals','all-requests','pending-issue','partial-issue','pending-record','wip-management','dispatch-queue','dispatch','issued-items','pending-dispatch-approvals','master_archive','formula-requests'];
 
         // Detail panel cache (in-memory, no localStorage)
         const DETAIL_CACHE_TTL_MS = 8000;
@@ -1038,6 +1069,9 @@
 
             // Load view content
             switch (viewId) {
+                case 'dashboard':
+                    renderDashboardView();
+                    break;
                 case 'my-requests':
                     renderMyRequests();
                     break;
@@ -1088,6 +1122,76 @@
                     break;
                 default:
                     contentArea.innerHTML = `<div class="p-8 text-center"><p class="text-gray-500">View "${viewId}" pending implementation.</p></div>`;
+            }
+        }
+
+        // ==========================================
+        // DASHBOARD VIEW (widgets)
+        // ==========================================
+        async function renderDashboardView() {
+            const contentArea = document.getElementById('contentArea');
+            contentArea.innerHTML = `
+                <div class="fade-in">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">📊 Dashboard</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" id="dashboardWidgets">
+                        <div class="animate-pulse bg-gray-100 rounded-xl h-32"></div>
+                        <div class="animate-pulse bg-gray-100 rounded-xl h-32"></div>
+                        <div class="animate-pulse bg-gray-100 rounded-xl h-32"></div>
+                        <div class="animate-pulse bg-gray-100 rounded-xl h-32"></div>
+                    </div>
+                </div>
+            `;
+            try {
+                const data = await callBackend('get_stage_counts', {});
+                const c = (data && data.counts) ? data.counts : {};
+                const pendingApprovals = c.PENDING_APPROVALS || 0;
+                const pendingIssue = c.PENDING_ISSUE || 0;
+                const todayIssued = c.TODAY_ISSUED || 0;
+                const overdue = c.OVERDUE || 0;
+                const widgets = document.getElementById('dashboardWidgets');
+                if (widgets) {
+                    widgets.innerHTML = `
+                        <div class="bg-white rounded-xl shadow border border-gray-100 p-6 hover:shadow-md transition">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-3xl">⏳</span>
+                                <span class="text-3xl font-black text-amber-600">${pendingApprovals}</span>
+                            </div>
+                            <h3 class="font-bold text-gray-800">Pending Approvals</h3>
+                            <p class="text-xs text-gray-500 mt-1">Awaiting manager action</p>
+                            <button onclick="loadView('pending-approvals')" class="mt-4 w-full py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-semibold hover:bg-amber-100">View</button>
+                        </div>
+                        <div class="bg-white rounded-xl shadow border border-gray-100 p-6 hover:shadow-md transition">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-3xl">📦</span>
+                                <span class="text-3xl font-black text-blue-600">${pendingIssue}</span>
+                            </div>
+                            <h3 class="font-bold text-gray-800">Pending Issue</h3>
+                            <p class="text-xs text-gray-500 mt-1">Ready for store to issue</p>
+                            <button onclick="loadView('pending-issue')" class="mt-4 w-full py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-100">View</button>
+                        </div>
+                        <div class="bg-white rounded-xl shadow border border-gray-100 p-6 hover:shadow-md transition">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-3xl">✅</span>
+                                <span class="text-3xl font-black text-green-600">${todayIssued}</span>
+                            </div>
+                            <h3 class="font-bold text-gray-800">Today's Issues</h3>
+                            <p class="text-xs text-gray-500 mt-1">Issued today</p>
+                            <button onclick="loadView('issued-items')" class="mt-4 w-full py-2 bg-green-50 text-green-700 rounded-lg text-sm font-semibold hover:bg-green-100">View</button>
+                        </div>
+                        <div class="bg-white rounded-xl shadow border border-gray-100 p-6 hover:shadow-md transition">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-3xl">⚠️</span>
+                                <span class="text-3xl font-black text-red-600">${overdue}</span>
+                            </div>
+                            <h3 class="font-bold text-gray-800">Overdue</h3>
+                            <p class="text-xs text-gray-500 mt-1">Pending &gt; 3 days</p>
+                            <button onclick="loadView('pending-approvals')" class="mt-4 w-full py-2 bg-red-50 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-100">View</button>
+                        </div>
+                    `;
+                }
+            } catch (e) {
+                const widgets = document.getElementById('dashboardWidgets');
+                if (widgets) widgets.innerHTML = '<p class="text-red-500 col-span-4">Failed to load dashboard. Check connection.</p>';
             }
         }
 
@@ -1191,23 +1295,94 @@
             }
         }
 
+        var newRequestWizardStep = 1;
+        function goToNewRequestWizardStep(step) {
+            newRequestWizardStep = step;
+            document.querySelectorAll('[id^="wizard-step-"]').forEach(function (el) { el.classList.add('hidden'); });
+            var s = document.getElementById('wizard-step-' + step);
+            if (s) s.classList.remove('hidden');
+            var ind = document.getElementById('wizard-step-indicator');
+            if (ind) ind.textContent = 'Step ' + step + ' of 4';
+            var backBtn = document.getElementById('wizard-back-btn');
+            var nextBtn = document.getElementById('wizard-next-btn');
+            var submitBtn = document.getElementById('wizard-submit-btn');
+            if (backBtn) backBtn.style.display = step === 1 ? 'none' : 'inline-block';
+            if (nextBtn) nextBtn.style.display = step === 4 ? 'none' : 'inline-block';
+            if (submitBtn) submitBtn.style.display = step === 4 ? 'inline-block' : 'none';
+            document.querySelectorAll('.wizard-step-2-form-buttons').forEach(function (el) { el.style.display = step === 2 ? 'none' : 'flex'; });
+            if (step === 4) window.renderNewRequestReview && window.renderNewRequestReview();
+        }
+        function renderNewRequestReview() {
+            var container = document.getElementById('wizard-review-container');
+            if (!container) return;
+            var type = window.newRequestWizardType || 'production';
+            if (type === 'production') {
+                var product = (document.getElementById('productSelect') && document.getElementById('productSelect').options[document.getElementById('productSelect').selectedIndex]) ? document.getElementById('productSelect').value : '';
+                var qty = (document.getElementById('prodQuantity') && document.getElementById('prodQuantity').value) || '';
+                var unit = (document.getElementById('prodUnit') && document.getElementById('prodUnit').value) || '';
+                var purpose = (document.getElementById('prodPurpose') && document.getElementById('prodPurpose').value) || '';
+                var target = (document.getElementById('prodTargetDate') && document.getElementById('prodTargetDate').value) || '';
+                var remarks = (document.getElementById('prodRemarks') && document.getElementById('prodRemarks').value) || '';
+                var packingJson = typeof getProductionPackingLabelsJson === 'function' ? getProductionPackingLabelsJson('prodPackingRows') : [];
+                var labelsJson = typeof getProductionPackingLabelsJson === 'function' ? getProductionPackingLabelsJson('prodLabelsRows') : [];
+                var packingLine = packingJson.length ? packingJson.length + ' packing item(s)' : 'No packing items';
+                var labelsLine = labelsJson.length ? labelsJson.length + ' label item(s)' : 'No label items';
+                container.innerHTML = '<p class="text-sm font-bold text-gray-700 mb-3">4. Review your request</p>' +
+                    '<div class="text-xs text-gray-600 space-y-2">' +
+                    '<p><strong>Type:</strong> Production</p>' +
+                    '<p><strong>Product:</strong> ' + (product || '—').replace(/</g, '&lt;') + '</p>' +
+                    '<p><strong>Quantity:</strong> ' + (qty || '—').replace(/</g, '&lt;') + ' ' + (unit || '').replace(/</g, '&lt;') + '</p>' +
+                    '<p><strong>Purpose / Batch:</strong> ' + (purpose || '—').replace(/</g, '&lt;') + '</p>' +
+                    '<p><strong>Target date:</strong> ' + (target || '—').replace(/</g, '&lt;') + '</p>' +
+                    (remarks ? '<p><strong>Remarks:</strong> ' + String(remarks).replace(/</g, '&lt;').substring(0, 200) + (remarks.length > 200 ? '...' : '') + '</p>' : '') +
+                    '<p><strong>Packing:</strong> ' + packingLine + '</p>' +
+                    '<p><strong>Labels:</strong> ' + labelsLine + '</p>' +
+                    '</div><p class="text-xs text-gray-500 mt-4">Click <strong>Submit for Approval</strong> to send.</p>';
+            } else {
+                var purpose = (document.getElementById('resPurpose') && document.getElementById('resPurpose').value) || '';
+                var remarks = (document.getElementById('resRemarks') && document.getElementById('resRemarks').value) || '';
+                var items = typeof collectItemsData === 'function' ? collectItemsData() : [];
+                var itemsHtml = items.length ? items.map(function (it) { return '<li>' + (it.name || '').replace(/</g, '&lt;') + ' &ndash; ' + (it.quantity || '') + ' ' + (it.unit || '').replace(/</g, '&lt;') + '</li>'; }).join('') : '<li>No items</li>';
+                container.innerHTML = '<p class="text-sm font-bold text-gray-700 mb-3">4. Review your request</p>' +
+                    '<div class="text-xs text-gray-600 space-y-2">' +
+                    '<p><strong>Type:</strong> Research</p>' +
+                    '<p><strong>Trial / Project:</strong> ' + (purpose || '—').replace(/</g, '&lt;') + '</p>' +
+                    (remarks ? '<p><strong>Remarks:</strong> ' + String(remarks).replace(/</g, '&lt;').substring(0, 200) + (remarks.length > 200 ? '...' : '') + '</p>' : '') +
+                    '<p><strong>Items (' + items.length + '):</strong></p><ul class="list-disc list-inside ml-2">' + itemsHtml + '</ul>' +
+                    '</div><p class="text-xs text-gray-500 mt-4">Click <strong>Submit for Approval</strong> to send.</p>';
+            }
+        }
+        function submitFromWizard() {
+            var type = window.newRequestWizardType || 'production';
+            if (type === 'production') {
+                var form = document.getElementById('productionFormForm');
+                if (form) form.requestSubmit();
+            } else {
+                var form = document.getElementById('researchFormForm');
+                if (form) form.requestSubmit();
+            }
+        }
         function renderNewRequestForm() {
+            newRequestWizardStep = 1;
             const contentArea = document.getElementById('contentArea');
             contentArea.innerHTML = `
                 <div class="fade-in max-w-2xl mx-auto">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-6">New Request</h2>
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">New Request</h2>
+                        <p id="wizard-step-indicator" class="text-sm font-semibold text-gray-500">Step 1 of 4</p>
+                    </div>
                     
-                    <!-- Request Type Selection -->
-                    <div class="bg-white rounded-lg shadow p-6 mb-6">
-                        <label class="block text-sm font-bold text-gray-700 mb-3">Request Type</label>
+                    <!-- Step 1: Request Type Selection -->
+                    <div id="wizard-step-1" class="bg-white rounded-lg shadow p-6 mb-6">
+                        <label class="block text-sm font-bold text-gray-700 mb-3">1. Choose request type</label>
                         <div class="grid grid-cols-2 gap-4">
-                            <button onclick="selectRequestType('production')" id="btn-type-production"
+                            <button type="button" onclick="selectRequestType('production')" id="btn-type-production"
                                     class="p-6 border-2 border-blue-500 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
                                 <div class="text-4xl mb-2">🏭</div>
                                 <div class="font-bold text-gray-800">Production</div>
                                 <div class="text-xs text-gray-600 mt-1">For manufacturing products</div>
                             </button>
-                            <button onclick="selectRequestType('research')" id="btn-type-research"
+                            <button type="button" onclick="selectRequestType('research')" id="btn-type-research"
                                     class="p-6 border-2 border-gray-300 rounded-lg hover:border-gray-400 transition-colors">
                                 <div class="text-4xl mb-2">🔬</div>
                                 <div class="font-bold text-gray-800">Research</div>
@@ -1216,9 +1391,11 @@
                         </div>
                     </div>
                     
+                    <!-- Step 2: Main details (Production or Research form) -->
+                    <div id="wizard-step-2" class="hidden">
                     <!-- Production Form -->
-                    <div id="productionForm" class="bg-white rounded-lg shadow p-6">
-                        <form onsubmit="submitProductionRequest(event)" class="space-y-6">
+                    <div id="productionForm" class="bg-white rounded-lg shadow p-6 mb-6">
+                        <form onsubmit="submitProductionRequest(event)" class="space-y-6" id="productionFormForm">
                             <div>
                                 <div class="flex justify-between items-center mb-2">
                                     <label class="text-sm font-bold text-gray-700">Product Name</label>
@@ -1281,7 +1458,7 @@
                                 </div>
                             </div>
                             
-                            <div class="flex gap-4">
+                            <div class="flex gap-4 wizard-step-2-form-buttons">
                                 <button type="button" onclick="loadView('my-requests')" class="btn-secondary flex-1">
                                     Cancel
                                 </button>
@@ -1294,7 +1471,7 @@
                     
                     <!-- Research Form (MULTI-ITEM ENHANCED) -->
                     <div id="researchForm" class="bg-white rounded-lg shadow p-6 hidden">
-                        <form onsubmit="submitResearchRequest(event)" class="space-y-6">
+                        <form onsubmit="submitResearchRequest(event)" class="space-y-6" id="researchFormForm">
                             
                             <!-- Category Selector Tabs -->
                             <div>
@@ -1354,7 +1531,7 @@
                                           placeholder="Purpose of R&D use..."></textarea>
                             </div>
                             
-                            <div class="flex gap-4">
+                            <div class="flex gap-4 wizard-step-2-form-buttons">
                                 <button type="button" onclick="loadView('my-requests')" class="btn-secondary flex-1">
                                     Cancel
                                 </button>
@@ -1364,16 +1541,40 @@
                             </div>
                         </form>
                     </div>
+                    </div>
+                    
+                    <!-- Step 3: Optional packing / Review next -->
+                    <div id="wizard-step-3" class="hidden">
+                        <div class="bg-white rounded-lg shadow p-6 mb-6">
+                            <p class="text-sm font-bold text-gray-700 mb-2">3. Optional packing &amp; labels</p>
+                            <p class="text-xs text-gray-500 mb-4">You can add packing and labels above in Step 2, or add them later via request details → Update packing &amp; labels. Review your request in the next step.</p>
+                            <p class="text-xs text-gray-600">Click <strong>Next</strong> to review and submit.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Step 4: Review and Submit -->
+                    <div id="wizard-step-4" class="hidden">
+                        <div id="wizard-review-container" class="bg-white rounded-lg shadow p-6"></div>
+                    </div>
+                    
+                    <!-- Wizard footer: Back, Next, Submit -->
+                    <div id="wizard-footer" class="mt-6 flex gap-4 flex-wrap">
+                        <button type="button" id="wizard-back-btn" onclick="goToNewRequestWizardStep(newRequestWizardStep - 1)" class="btn-secondary" style="display:none">← Back</button>
+                        <button type="button" id="wizard-next-btn" onclick="var s=window.newRequestWizardStep||1; if(s===1 && window.newRequestWizardType) goToNewRequestWizardStep(2); else if(s===2) goToNewRequestWizardStep(3); else if(s===3) goToNewRequestWizardStep(4);" class="btn-primary">Next →</button>
+                        <button type="button" id="wizard-submit-btn" onclick="submitFromWizard()" class="btn-primary" style="display:none">Submit for Approval</button>
+                    </div>
                 </div>
             `;
 
             loadFormDropdowns();
+            goToNewRequestWizardStep(1);
         }
 
         // ==========================================
         // EMPLOYEE FORM HELPERS
         // ==========================================
         function selectRequestType(type) {
+            window.newRequestWizardType = type;
             if (type === 'production') {
                 document.getElementById('productionForm').classList.remove('hidden');
                 document.getElementById('researchForm').classList.add('hidden');
@@ -2778,7 +2979,7 @@
                 const remaining = totalQty - partialQty;
                 actionBtns = `
                     <p class="w-full text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mb-2">📦 Partially issued: <strong>${partialQty}</strong> of <strong>${totalQty}</strong> ${req.unit || 'units'}. Remaining: <strong>${remaining}</strong></p>
-                    <button type="button" onclick="handleStageAction(event, '${req.id}', 'ISSUE')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">✅ Issue full stock (remaining)</button>
+                    <button type="button" onclick="openIssueMaterialsWizard('${req.id.replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">✅ Issue full stock (remaining)</button>
                     <button type="button" onclick="openPartialIssueModal()" class="flex-1 bg-indigo-500 text-white font-black py-3 rounded-xl border-b-4 border-indigo-700 uppercase text-[10px] shadow-lg hover:bg-indigo-600 transition-all">📦 Issue more (partial)</button>
                 `;
             } else if (userRole === 'Store Incharge' && (stage === 'AWAITING MATERIAL ISSUE' || stage === 'PENDING STORE & MANAGER' || (stage || '').indexOf('PARTIAL OK') >= 0 || (stage || '').toUpperCase().indexOf('PENDING MANAGER') >= 0)) {
@@ -2787,7 +2988,7 @@
                 const fullIssueDisabled = stockShort ? ' disabled title="Use Issue Partial when items are short, or add stock in Main Inventory first."' : '';
                 const fullIssueClass = stockShort ? 'flex-1 bg-blue-400 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg opacity-60 cursor-not-allowed' : 'flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-blue-700 transition-all';
                     actionBtns = `
-                    <button type="button"${fullIssueDisabled} onclick="handleStageAction(event, '${req.id}', 'ISSUE')" class="${fullIssueClass}">${btnLabel}</button>
+                    <button type="button"${fullIssueDisabled} onclick="openIssueMaterialsWizard('${req.id.replace(/'/g, "\\'")}')" class="${fullIssueClass}">${btnLabel}</button>
                     <button type="button" onclick="openPartialIssueModal()" class="flex-1 bg-indigo-500 text-white font-black py-3 rounded-xl border-b-4 border-indigo-700 uppercase text-[10px] shadow-lg hover:bg-indigo-600 transition-all">📦 Issue Partial</button>
                 `;
 
@@ -2894,6 +3095,58 @@
 
         function requestItemCorrection(reqId, itemName, currentQty) {
             openCorrectionForm(reqId, itemName, currentQty);
+        }
+
+        function openIssueMaterialsWizard(reqId) {
+            var req = window._currentReqDetails;
+            if (!req || req.id !== reqId) req = { id: reqId, productName: 'Request ' + reqId, quantity: '', unit: 'Units' };
+            var productName = String(req.productName || 'Request').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            var qty = req.quantity != null ? req.quantity : (req.requestedQty != null ? req.requestedQty : '');
+            var unit = String(req.unit || 'Units').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            var reqIdEsc = (req.id || '').replace(/'/g, "\\'");
+            var existing = document.getElementById('issueMaterialsWizardModal');
+            if (existing) existing.remove();
+            var modal = document.createElement('div');
+            modal.id = 'issueMaterialsWizardModal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110] overflow-y-auto py-4';
+            modal.innerHTML = '<div class="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl mx-4 border-t-4 border-blue-500 my-4">' +
+                '<p class="text-xs font-semibold text-gray-500 mb-2">Step <span id="issue-wizard-step-num">1</span> of 2</p>' +
+                '<div id="issue-wizard-step-1">' +
+                '<h2 class="text-xl font-bold text-gray-800 mb-2">Confirm issue – ' + productName + '</h2>' +
+                '<p class="text-xs text-gray-600 mb-2">Request: <strong>' + (req.id || '').replace(/</g, '&lt;') + '</strong></p>' +
+                '<p class="text-xs text-gray-600 mb-2">Product: <strong>' + productName + '</strong></p>' +
+                '<p class="text-xs text-gray-600 mb-2">Quantity: <strong>' + String(qty).replace(/</g, '&lt;') + ' ' + unit + '</strong></p>' +
+                '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">Quantities will be deducted from Main Inventory.</p>' +
+                '</div>' +
+                '<div id="issue-wizard-step-2" class="hidden">' +
+                '<h2 class="text-xl font-bold text-gray-800 mb-2">Confirm deduction from inventory</h2>' +
+                '<p class="text-xs text-gray-600 mb-2">Request: <strong>' + (req.id || '').replace(/</g, '&lt;') + '</strong> · ' + productName + ' · ' + String(qty).replace(/</g, '&lt;') + ' ' + unit + '</p>' +
+                '<p class="text-xs text-gray-600 mb-4">Click <strong>Issue materials</strong> to deduct and mark as issued.</p>' +
+                '</div>' +
+                '<div class="flex gap-3 mt-6 flex-wrap">' +
+                '<button type="button" id="issue-wizard-cancel" class="flex-1 min-w-[80px] py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300">Cancel</button>' +
+                '<button type="button" id="issue-wizard-back" class="hidden flex-1 min-w-[80px] py-2 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200">← Back</button>' +
+                '<button type="button" id="issue-wizard-next" class="flex-1 min-w-[80px] py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700">Next: Confirm deduction</button>' +
+                '<button type="button" id="issue-wizard-submit" class="hidden flex-1 min-w-[80px] py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700">Issue materials</button>' +
+                '</div></div>';
+            document.body.appendChild(modal);
+            var step = 1;
+            function showIssueStep(s) {
+                step = s;
+                document.getElementById('issue-wizard-step-num').textContent = s;
+                document.getElementById('issue-wizard-step-1').classList.toggle('hidden', s !== 1);
+                document.getElementById('issue-wizard-step-2').classList.toggle('hidden', s !== 2);
+                document.getElementById('issue-wizard-back').classList.toggle('hidden', s === 1);
+                document.getElementById('issue-wizard-next').classList.toggle('hidden', s === 2);
+                document.getElementById('issue-wizard-submit').classList.toggle('hidden', s !== 2);
+            }
+            document.getElementById('issue-wizard-cancel').onclick = function() { document.getElementById('issueMaterialsWizardModal').remove(); };
+            document.getElementById('issue-wizard-back').onclick = function() { showIssueStep(1); };
+            document.getElementById('issue-wizard-next').onclick = function() { showIssueStep(2); };
+            document.getElementById('issue-wizard-submit').onclick = function() {
+                document.getElementById('issueMaterialsWizardModal').remove();
+                handleStageAction(null, reqId, 'ISSUE');
+            };
         }
 
         function openPartialIssueModal() {
@@ -3322,6 +3575,9 @@
             if (cached && cached.request) {
                 currentRequest = cached.request;
                 applyDetailData(id, cached);
+                if ((currentRequest.currentStage || '').toLowerCase().indexOf('reservation expired') >= 0 && typeof showToast === 'function') {
+                    showToast('This request\'s reservation was released. Please re-issue materials.', 'warning');
+                }
                     callBackend('get_request_details', { id: id, user: currentUser ? currentUser.name : '', email: currentUser ? currentUser.email : '' })
                     .then(data => {
                         if (data.request) {
@@ -3345,6 +3601,9 @@
                 currentRequest = req;
                 setCachedDetail(id, data);
                 applyDetailData(id, data);
+                if ((req.currentStage || '').toLowerCase().indexOf('reservation expired') >= 0 && typeof showToast === 'function') {
+                    showToast('This request\'s reservation was released. Please re-issue materials.', 'warning');
+                }
             } catch (err) {
                 console.error(err);
                 showToast('Failed to load details', 'error');
@@ -3903,6 +4162,7 @@
                 try {
                     currentUser = JSON.parse(savedUser);
                     currentUser.role = normalizeRole(currentUser.role); // NORMALIZE ON LOAD
+                    localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
                     showApp();
                     startAutoRefresh();
                 } catch (e) {
