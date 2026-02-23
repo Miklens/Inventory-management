@@ -1068,7 +1068,7 @@
   }
 
   async function getPendingApprovals(params) {
-    return getRequestsByStage({ stage: 'PENDING_APPROVALS', limit: 100 });
+    return getRequestsByStage({ stage: 'PENDING_APPROVALS', limit: 100, light: true });
   }
 
   async function getMaterialQueue() {
