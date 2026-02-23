@@ -853,16 +853,18 @@
   async function submitRequest(params) {
     var newId = 'REQ-' + Date.now();
     var docRef = db.collection('Requisitions_V2').doc(newId);
-    var type = (params.type || 'Production').toString();
+    var type = String(params.type || 'Production').trim();
     var email = String(params.requesterEmail || params.employeeEmail || '').toLowerCase().trim();
-    var name = (params.requesterName || params.employeeName || '').trim();
+    var name = String(params.requesterName || params.employeeName || '').trim();
     var requestedQty = params.requestedQty != null ? Number(params.requestedQty) : (params.quantity != null ? Number(params.quantity) : 0);
-    if (typeof requestedQty !== 'number' || isNaN(requestedQty)) requestedQty = 0;
-    var toJson = function (x) {
-      if (x == null) return '[]';
+    if (typeof requestedQty !== 'number' || isNaN(requestedQty) || requestedQty < 0) requestedQty = 0;
+    var toStr = function (x) {
+      if (x == null || x === undefined) return '';
       if (typeof x === 'string') return x;
-      try { return JSON.stringify(x); } catch (e) { return '[]'; }
+      try { return JSON.stringify(x); } catch (e) { return ''; }
     };
+    var notes = String(params.notes || params.remarks || '');
+    if (params.purpose != null && String(params.purpose).trim() !== '') notes = String(params.purpose).trim() + (notes ? '\n' + notes : '');
     var payload = {
       RequestID: newId,
       Type: type,
@@ -871,21 +873,29 @@
       EmployeeName: name,
       ProductName: String(params.productName || ''),
       RequestedQty: requestedQty,
-      Formulaltems: toJson(params.ingredients || params.formulaItems),
-      Additionalltems: toJson(params.packing || params.packingItems),
+      Formulaltems: toStr(params.ingredients || params.formulaItems) || '[]',
+      Additionalltems: toStr(params.packing || params.packingItems) || '[]',
       ManagerEmail: String(params.managerEmail || '').toLowerCase().trim(),
       CreatedDate: new Date().toISOString(),
       Unit: String(params.unit || ''),
-      Labels: toJson(params.labels),
-      Notes: String(params.notes || params.remarks || ''),
+      Labels: toStr(params.labels) || '[]',
+      Notes: notes,
       CurrentStage: type.toLowerCase() === 'research' ? 'Pending Store & Manager' : 'Pending Manager Approval',
-      AdditionalItems: toJson(params.additionalItems || params.items),
+      AdditionalItems: toStr(params.additionalItems || params.items) || '[]',
       Corrections: '[]',
       BatchID: '',
       PartialIssuedQty: 0
     };
-    if (params.purpose != null && params.purpose !== '') payload.Notes = String(params.purpose).trim() + (payload.Notes ? '\n' + payload.Notes : '');
-    await docRef.set(sanitizeForFirestore(payload));
+    var safe = {};
+    for (var k in payload) {
+      if (!Object.prototype.hasOwnProperty.call(payload, k)) continue;
+      var v = payload[k];
+      if (typeof v === 'string') safe[k] = v;
+      else if (typeof v === 'number' && v === v && v !== Infinity && v !== -Infinity) safe[k] = v;
+      else if (v === null || v === undefined) safe[k] = '';
+      else safe[k] = String(v);
+    }
+    await docRef.set(safe);
     await pushNotificationQueue('approval_needed', {
       requestId: newId,
       managerEmail: (payload.ManagerEmail || '').toString().trim(),
