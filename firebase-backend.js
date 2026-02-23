@@ -675,6 +675,66 @@
     return { result: 'success' };
   }
 
+  /** Deduct finished goods from Database/latest when a dispatch is approved. */
+  async function deductFinishedGoodsForDispatch(dispatchId, productName, quantity, unit, requestId) {
+    var latestRef = db.collection('Database').doc('latest');
+    var snap = await latestRef.get();
+    if (!snap.exists) return { result: 'error', error: 'No inventory data. Add stock in Main Inventory first.', code: 'NO_INVENTORY' };
+    var d = snap.data();
+    var currentVersion = (d.latestId || '').toString();
+    var payload = (d.data != null) ? d.data : d;
+    var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    if (!inv || typeof inv !== 'object') return { result: 'error', error: 'Inventory structure not found.', code: 'NO_INVENTORY' };
+
+    var arr = inv.finishedGoods || inv.products || [];
+    if (!Array.isArray(arr)) return { result: 'error', error: 'Finished goods list not found.', code: 'NO_INVENTORY' };
+
+    var qty = parseFloat(quantity) || 0;
+    if (qty <= 0) return { result: 'success' };
+
+    var nameStr = (productName || '').toString().trim();
+    var remaining = qty;
+    for (var i = 0; i < arr.length && remaining > 0; i++) {
+      var item = arr[i];
+      var match = nameStr && (String(item.name || '') === nameStr || String(item.itemName || '') === nameStr || String(item.id || '') === nameStr);
+      if (!match) continue;
+      var current = parseFloat(item.quantity || item.qty || 0) || 0;
+      var deduct = Math.min(remaining, current);
+      item.quantity = item.qty = Math.max(0, current - deduct);
+      remaining -= deduct;
+    }
+
+    if (remaining > 0) {
+      await auditLog('dispatch_deduction_shortfall', 'system', { dispatchId: dispatchId, requestId: requestId, productName: productName, shortfall: remaining });
+      return { result: 'error', error: 'Insufficient finished goods for ' + productName + '. Shortfall: ' + remaining + ' ' + (unit || ''), code: 'SHORTFALL' };
+    }
+
+    var nowIso = new Date().toISOString();
+    var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
+    if (!Array.isArray(payload.transactions)) payload.transactions = [];
+    payload.transactions.push({
+      id: Date.now().toString() + '-disp',
+      itemId: productName,
+      itemName: productName,
+      category: 'finishedGoods',
+      type: 'dispatch',
+      quantity: -qty,
+      date: dateStr,
+      requestId: requestId || '',
+      dispatchId: dispatchId
+    });
+
+    var saveResult = await saveInventory(payload, currentVersion);
+    if (saveResult.result === 'error' && saveResult.code === 'CONFLICT') {
+      return { result: 'error', error: saveResult.error || 'Inventory was changed by someone else. Sync Main Inventory, then approve dispatch again.', code: 'CONFLICT', serverVersion: saveResult.serverVersion };
+    }
+    if (saveResult.result !== 'success' && saveResult.status !== 'success') {
+      return { result: 'error', error: saveResult.error || 'Dispatch deduction failed' };
+    }
+    await auditLog('dispatch_deduction', 'system', { dispatchId: dispatchId, requestId: requestId, productName: productName, quantity: qty });
+    return { result: 'success' };
+  }
+
   /** Release reservations older than X hours (optional auto-release). Resets requisition to Awaiting Material Issue so Store can re-issue. */
   async function releaseExpiredReservations(params) {
     var hours = parseFloat(params.hours || params.hoursLimit || 48, 10) || 48;
@@ -746,6 +806,7 @@
       if (st === 'PENDING_APPROVALS') {
         if (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) return true;
         if (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0) return true;
+        if (status === 'CORRECTION_REQUIRED' && cur.indexOf('RE-APPROVAL') >= 0) return true;
         return false;
       }
       if (st === 'PENDING_ISSUE') {
@@ -917,7 +978,7 @@
       var cur = (r.CurrentStage || r.currentStage || '').toUpperCase();
       var created = r.CreatedDate || r.date || '';
       var createdMs = created ? new Date(created).getTime() : 0;
-      var isPendingApproval = (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) || (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0);
+      var isPendingApproval = (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) || (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0) || (status === 'CORRECTION_REQUIRED' && cur.indexOf('RE-APPROVAL') >= 0);
       var isPendingIssue = cur.indexOf('AWAITING MATERIAL ISSUE') >= 0 || cur.indexOf('PENDING STORE') >= 0 || (status === 'APPROVED' && cur.indexOf('AWAITING') >= 0) || status === 'PARTIALLY_ISSUED';
       if (isPendingApproval) counts.PENDING_APPROVALS++;
       if (isPendingIssue) counts.PENDING_ISSUE++;
@@ -934,7 +995,8 @@
     var dispSnap = await db.collection('RequisitionDispatches').get();
     dispSnap.forEach(function (d) {
       var x = d.data();
-      if ((x.Status || '').toLowerCase() === 'pending') counts.PENDING_DISPATCH_APPROVALS++;
+      var s = (x.Status || '').toLowerCase();
+      if (s === 'pending' || s === 'pending_approval') counts.PENDING_DISPATCH_APPROVALS++;
     });
     var formulaSnap = await db.collection('FormulaRequests').get();
     formulaSnap.forEach(function (d) {
@@ -1006,11 +1068,20 @@
   async function updateRequestStage(params) {
     var id = params.id;
     if (!id) return fail(new Error('No id'));
+    var stageAction = (params.stageAction || '').toUpperCase();
+    if (stageAction === 'ISSUE' || stageAction === 'PARTIAL_ISSUE') {
+      var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
+      var allowed = await hasRole(actorId, ['Store Incharge', 'Store', 'Manager', 'Admin']);
+      if (!allowed) return fail(new Error('Only Store Incharge, Manager, or Admin can issue or partially issue materials'));
+    } else if (stageAction === 'RECORD') {
+      var recordActorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
+      var recordAllowed = await hasRole(recordActorId, ['Manager', 'Admin']);
+      if (!recordAllowed) return fail(new Error('Only Manager or Admin can record production'));
+    }
     var docRef = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
     var snap = await docRef.get();
     if (!snap.exists) return fail(new Error('Request not found'));
     var updates = {};
-    var stageAction = (params.stageAction || '').toUpperCase();
     if (stageAction === 'ISSUE') {
       var data = snap.data();
       var currentStatus = (data.Status || data.status || '').toUpperCase();
@@ -1112,6 +1183,9 @@
   async function actionRequest(params, action) {
     var id = params.id;
     if (!id) return fail(new Error('No id'));
+    var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
+    var allowed = await hasRole(actorId, ['Manager', 'Admin']);
+    if (!allowed) return fail(new Error('Only Manager or Admin can approve, reject, or put requests on hold'));
     var docRef = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
     var snap = await docRef.get();
     if (!snap.exists) return fail(new Error('Request not found'));
@@ -1587,13 +1661,24 @@
     if (!snap.exists) return fail(new Error('Dispatch not found'));
     var d = snap.data();
     if ((d.Status || '').toUpperCase() === 'APPROVED') return fail(new Error('Dispatch already approved'));
+
+    var requestId = d.RequestID || '';
+    var productName = (d.ProductName || '').toString().trim();
+    var qty = parseFloat(d.Quantity);
+    var unit = (d.Unit || '').toString().trim();
+    var mainInvSynced = 'N';
+    var deductResult = await deductFinishedGoodsForDispatch(dispatchId, productName, qty, unit, requestId);
+    if (deductResult.result === 'success') {
+      mainInvSynced = 'Y';
+    } else if (deductResult.code === 'CONFLICT') {
+      return fail(new Error(deductResult.error || 'Inventory was changed by someone else. Sync Main Inventory and try again.'));
+    }
     await docRef.update({
       Status: 'APPROVED',
       ApprovedBy: approvedBy,
       ApprovedAt: new Date().toISOString(),
-      MainInvSynced: 'Y'
+      MainInvSynced: mainInvSynced
     });
-    var requestId = d.RequestID || '';
     var requesterEmail = '';
     if (requestId) {
       var reqSnap = await db.collection('Requisitions_V2').doc(String(requestId).replace(/\//g, '_')).get();
@@ -1602,12 +1687,13 @@
     await pushNotificationQueue('dispatch_approved', {
       requestId: requestId,
       requesterEmail: requesterEmail,
-      productName: d.ProductName || '',
-      quantity: d.Quantity,
-      unit: d.Unit || '',
+      productName: productName,
+      quantity: qty,
+      unit: unit,
       approvedBy: approvedBy
     });
-    return ok({ message: 'Dispatch approved' });
+    var message = mainInvSynced === 'Y' ? 'Dispatch approved and Main Inventory deducted.' : 'Dispatch approved. Main Inventory was not deducted (' + (deductResult.error || 'insufficient stock or no inventory') + '). Deduct manually in Main Inventory if needed.';
+    return ok({ message: message, mainInvSynced: mainInvSynced });
   }
 
   async function confirmFormula(params) {
