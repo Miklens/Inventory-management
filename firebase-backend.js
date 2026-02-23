@@ -273,6 +273,65 @@
       var managersCorr = await getManagerAdminEmails();
       to = managersCorr.length ? managersCorr.join(',') : '';
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Correction Requested';
+    } else if (type === 'request_approved') {
+      eventTitle = 'Request Approved';
+      title = 'Requisition Approved';
+      color = STATUS_COLORS.SUCCESS;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Approved by', value: payload.approvedBy || '' },
+        { label: 'Action', value: 'Awaiting material issue from Store. You will be notified when materials are issued.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersApp = await getManagerAdminEmails(); to = managersApp.length ? managersApp.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Request Approved – ' + (payload.productName || '');
+    } else if (type === 'request_rejected') {
+      eventTitle = 'Request Rejected';
+      title = 'Requisition Rejected';
+      color = STATUS_COLORS.ERROR;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Rejected by', value: payload.rejectedBy || '' },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Action', value: 'You may submit a new request if needed.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersRej = await getManagerAdminEmails(); to = managersRej.length ? managersRej.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Request Rejected – ' + (payload.productName || '');
+    } else if (type === 'request_on_hold') {
+      eventTitle = 'Request On Hold';
+      title = 'Requisition On Hold';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Put on hold by', value: payload.heldBy || '' },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Action', value: 'Manager will resume or update this request. Check the app for status.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersHold = await getManagerAdminEmails(); to = managersHold.length ? managersHold.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Request On Hold – ' + (payload.productName || '');
+    } else if (type === 'partial_issued') {
+      eventTitle = 'Partially Issued';
+      title = 'Materials Partially Issued';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Issued', value: (payload.partialQty != null ? payload.partialQty : '') + ' ' + (payload.unit || '') },
+        { label: 'Requested', value: (payload.requestedQty != null ? payload.requestedQty : '') + ' ' + (payload.unit || '') },
+        { label: 'Issued by', value: payload.issuedBy || 'Store' },
+        { label: 'Action', value: 'Remaining quantity to be issued later. Check the app for status.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersPart = await getManagerAdminEmails(); to = managersPart.length ? managersPart.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Partially Issued – ' + (payload.productName || '');
     } else {
       eventTitle = type.replace(/_/g, ' ');
       details = [{ label: 'Type', value: type }, { label: 'Data', value: JSON.stringify(payload) }];
@@ -980,7 +1039,8 @@
       updates.Status = 'ISSUED';
       updates.CurrentStage = 'Manufacturing / WIP';
     } else if (params.stageAction === 'PARTIAL_ISSUE' && params.partialQty != null) {
-      updates.PartialIssuedQty = parseFloat(params.partialQty);
+      var partialQty = parseFloat(params.partialQty);
+      updates.PartialIssuedQty = partialQty;
       updates.Status = 'PARTIALLY_ISSUED';
       updates.CurrentStage = 'Partially Issued – remaining to issue';
     }
@@ -1001,6 +1061,21 @@
             issuedBy: params.user || params.email || 'Store'
           });
         } catch (e) { console.warn('materials_issued email:', e); }
+      }
+      if (updates.Status === 'PARTIALLY_ISSUED') {
+        var d2 = snap.data();
+        var partialQtyNum = updates.PartialIssuedQty != null ? updates.PartialIssuedQty : parseFloat(params.partialQty);
+        try {
+          pushNotificationQueue('partial_issued', {
+            requestId: id,
+            requesterEmail: (d2.EmployeeEm || d2.requesterEmail || '').trim(),
+            productName: d2.ProductName || d2.productName || '',
+            partialQty: partialQtyNum,
+            requestedQty: d2.RequestedQty != null ? d2.RequestedQty : d2.quantity,
+            unit: d2.Unit || d2.unit || '',
+            issuedBy: params.user || params.email || 'Store'
+          });
+        } catch (e) { console.warn('partial_issued email:', e); }
       }
     }
     return ok({ newStatus: updates.Status });
@@ -1085,6 +1160,45 @@
     } else if (action === 'APPROVED') {
       // Manager approved first – reserve stock until Store issues
       try { await upsertRequisitionReservation(id, data, 'reserved'); } catch (e) { /* non-fatal */ }
+      try {
+        await pushNotificationQueue('request_approved', {
+          requestId: id,
+          requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
+          requesterName: (data.EmployeeName || data.requesterName || '').trim(),
+          productName: data.ProductName || data.productName || '',
+          quantity: data.RequestedQty != null ? data.RequestedQty : data.quantity,
+          unit: data.Unit || data.unit || '',
+          approvedBy: params.user || params.email || 'Manager'
+        });
+      } catch (e) { console.warn('request_approved email:', e); }
+    }
+    if (action === 'REJECTED') {
+      try {
+        await pushNotificationQueue('request_rejected', {
+          requestId: id,
+          requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
+          requesterName: (data.EmployeeName || data.requesterName || '').trim(),
+          productName: data.ProductName || data.productName || '',
+          quantity: data.RequestedQty != null ? data.RequestedQty : data.quantity,
+          unit: data.Unit || data.unit || '',
+          rejectedBy: params.user || params.email || 'Manager',
+          reason: (params.reason || '').trim() || '—'
+        });
+      } catch (e) { console.warn('request_rejected email:', e); }
+    }
+    if (action === 'ON_HOLD') {
+      try {
+        await pushNotificationQueue('request_on_hold', {
+          requestId: id,
+          requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
+          requesterName: (data.EmployeeName || data.requesterName || '').trim(),
+          productName: data.ProductName || data.productName || '',
+          quantity: data.RequestedQty != null ? data.RequestedQty : data.quantity,
+          unit: data.Unit || data.unit || '',
+          heldBy: params.user || params.email || 'Manager',
+          reason: (params.reason || '').trim() || '—'
+        });
+      } catch (e) { console.warn('request_on_hold email:', e); }
     }
     await auditLog('requisition_' + (action === 'APPROVED' ? 'approve' : action === 'REJECTED' ? 'reject' : 'hold'), params.user || params.email || 'user', { requestId: id, action: action });
     return ok({});
