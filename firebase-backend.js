@@ -213,6 +213,38 @@
       to = (payload.requesterEmail || '').trim();
       if (!to) { var managersP = await getManagerAdminEmails(); to = managersP.length ? managersP.join(',') : ''; }
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Production Completed – ' + (payload.productName || '');
+    } else if (type === 'production_paused') {
+      eventTitle = 'Production Paused';
+      title = 'WIP Paused';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Paused by', value: payload.pausedBy || '' },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Requested by', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
+        { label: 'Action', value: 'Resume from WIP when ready.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersPause = await getManagerAdminEmails(); to = managersPause.length ? managersPause.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Production Paused – ' + (payload.productName || '');
+    } else if (type === 'production_cancelled') {
+      eventTitle = 'Production Cancelled';
+      title = 'WIP Cancelled';
+      color = STATUS_COLORS.ERROR;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Cancelled by', value: payload.cancelledBy || '' },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Requested by', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
+        { label: 'Action', value: 'Request is closed. Create a new request if needed.' }
+      ];
+      to = (payload.requesterEmail || '').trim();
+      if (!to) { var managersCancel = await getManagerAdminEmails(); to = managersCancel.length ? managersCancel.join(',') : ''; }
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Production Cancelled – ' + (payload.productName || '');
     } else if (type === 'materials_issued') {
       eventTitle = 'Materials Issued';
       title = 'Materials Issued to Floor';
@@ -1317,15 +1349,38 @@
     if (reason) up.reason = reason;
     await ref.update(up);
     var linkedReqId = batch.linkedReqId || batch.requestId || batch.reqId;
-    if (linkedReqId && status === 'completed') {
+    if (linkedReqId) {
       var reqRef = db.collection('Requisitions_V2').doc(String(linkedReqId).replace(/\//g, '_'));
       var reqSnap = await reqRef.get();
       if (reqSnap.exists) {
-        await reqRef.update({
-          Status: 'PRODUCED',
-          CurrentStage: 'Awaiting Dispatch',
-          ProducedAt: new Date().toISOString()
-        });
+        var reqData = reqSnap.data();
+        if (status === 'completed') {
+          await reqRef.update({
+            Status: 'PRODUCED',
+            CurrentStage: 'Awaiting Dispatch',
+            ProducedAt: new Date().toISOString()
+          });
+          await pushNotificationQueue('production_completed', {
+            requestId: linkedReqId,
+            requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
+            requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
+            productName: reqData.ProductName || '',
+            quantity: reqData.RequestedQty != null ? reqData.RequestedQty : reqData.quantity,
+            unit: reqData.Unit || '',
+            completedBy: (params.userEmail || params.email || '').trim() || 'WIP sync'
+          });
+        } else if (status === 'paused') {
+          await pushNotificationQueue('production_paused', {
+            requestId: linkedReqId,
+            requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
+            requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
+            productName: reqData.ProductName || '',
+            quantity: reqData.RequestedQty != null ? reqData.RequestedQty : reqData.quantity,
+            unit: reqData.Unit || '',
+            pausedBy: (params.userEmail || params.email || '').trim() || 'WIP sync',
+            reason: reason || ''
+          });
+        }
       }
     }
     return ok({ message: 'Synced' });
@@ -1505,6 +1560,16 @@
     var updates = {};
     if (action === 'PAUSE') {
       updates.CurrentStage = 'PAUSED';
+      await pushNotificationQueue('production_paused', {
+        requestId: id,
+        requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
+        requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
+        productName: reqData.ProductName || '',
+        quantity: reqData.RequestedQty != null ? reqData.RequestedQty : reqData.quantity,
+        unit: reqData.Unit || '',
+        pausedBy: userEmail || '',
+        reason: reason || ''
+      });
     } else if (action === 'COMPLETE') {
       updates.Status = 'COMPLETED';
       updates.CurrentStage = 'Production Completed';
@@ -1520,6 +1585,16 @@
     } else if (action === 'CANCEL') {
       updates.Status = 'CANCELLED';
       updates.CurrentStage = 'Cancelled';
+      await pushNotificationQueue('production_cancelled', {
+        requestId: id,
+        requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
+        requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
+        productName: reqData.ProductName || '',
+        quantity: reqData.RequestedQty != null ? reqData.RequestedQty : reqData.quantity,
+        unit: reqData.Unit || '',
+        cancelledBy: userEmail || '',
+        reason: reason || ''
+      });
     } else {
       return fail(new Error('Invalid wipAction: use PAUSE, COMPLETE, or CANCEL'));
     }
