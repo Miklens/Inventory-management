@@ -466,6 +466,8 @@
       row.labels = safeJson(r.Labels || r.labels, []);
       row.additionalItems = safeJson(r.AdditionalItems || r.additionalItems, []);
       row.corrections = safeJson(r.Corrections || r.corrections, []);
+    } else if ((String(r.Type || r.type || '')).toUpperCase() === 'RESEARCH') {
+      row.additionalItems = safeJson(r.AdditionalItems || r.additionalItems, []);
     }
     return row;
   }
