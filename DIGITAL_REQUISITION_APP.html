@@ -1252,7 +1252,7 @@
                                             <span class="text-[8px] font-black bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded uppercase">${req.type}</span>
                                             <span class="${statusStyle} text-[8px] font-black px-1.5 py-0.5 rounded uppercase">${statusText}</span>
                                         </div>
-                                        <h3 class="font-black text-gray-900 truncate leading-tight text-base group-hover:text-blue-600 transition-colors">${req.productName}</h3>
+                                        <h3 class="font-black text-gray-900 truncate leading-tight text-base group-hover:text-blue-600 transition-colors">${getRequestProductNameDisplay(req)}</h3>
                                         <div class="flex items-center gap-2 mt-1">
                                             <span class="text-[8px] font-black uppercase text-gray-400">At Station:</span>
                                             <span class="text-[8px] font-black px-1.5 py-0.5 rounded border ${getStageColor(isApproved && req.currentStage.includes('MANAGER APPROVAL') ? 'Awaiting Employee Confirmation' : req.currentStage)} uppercase tracking-tighter">${isApproved && req.currentStage.includes('MANAGER APPROVAL') ? 'Awaiting Employee Confirmation' : req.currentStage}</span>
@@ -2136,6 +2136,22 @@
             return status;
         }
 
+        function getRequestProductNameDisplay(req) {
+            if (!req) return '';
+            const name = (req.productName || '').trim();
+            if (name) return name;
+            if ((req.type || '').toUpperCase() !== 'RESEARCH') return name || 'Request';
+            let items = req.additionalItems || req.items;
+            if (typeof items === 'string') {
+                try { items = JSON.parse(items); } catch (e) { items = []; }
+            }
+            if (!Array.isArray(items) || items.length === 0) return 'Research items';
+            const names = items.map(function (x) { return (x.name || x.itemName || '').trim(); }).filter(Boolean);
+            if (names.length === 0) return 'Research items';
+            if (names.length <= 3) return names.join(', ');
+            return names.slice(0, 2).join(', ') + ' +' + (names.length - 2) + ' more';
+        }
+
         function userFriendlyError(backendMsg) {
             if (!backendMsg) return 'Something went wrong. Try again.';
             var s = String(backendMsg);
@@ -2285,7 +2301,7 @@
                                             <span class="text-[8px] font-black px-1.5 py-0.5 rounded border uppercase ${req.status === 'ISSUED_PENDING_APPROVAL' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-gray-50 text-gray-400'}">${getStatusDisplayText(req.status)}</span>
                                             ${req.status === 'PARTIALLY_ISSUED' && req.partialIssuedQty != null ? `<span class="text-[8px] font-black bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded uppercase">Partial ${req.partialIssuedQty}/${req.quantity || '?'}</span>` : ''}
                                         </div>
-                                        <h3 class="font-black text-gray-800 truncate text-base group-hover:text-blue-600 transition-colors leading-tight">${req.productName}</h3>
+                                        <h3 class="font-black text-gray-800 truncate text-base group-hover:text-blue-600 transition-colors leading-tight">${getRequestProductNameDisplay(req)}</h3>
                                         <div class="flex items-center gap-3 mt-1.5">
                                             <p class="text-[9px] text-gray-400 font-black uppercase">Staff: <span class="text-gray-600">${req.requesterName}</span></p>
                                         </div>
@@ -3021,7 +3037,7 @@
                 if (stage === 'AWAITING PRODUCTION RECORDING') {
                     actionBtns = `<button onclick="handleStageAction(event, '${req.id}', 'RECORD')" class="flex-1 bg-indigo-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-indigo-700 transition-all">Record Production (WIP)</button>`;
                 } else if (stage === 'AWAITING DISPATCH') {
-                    actionBtns = `<button onclick="openRequestDispatchModal('${req.id}', '${(req.productName || '').replace(/'/g, "\\'")}', ${parseFloat(req.requestedQty || req.quantity || 0) || 0}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">Request Dispatch</button>`;
+                    actionBtns = `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${parseFloat(req.requestedQty || req.quantity || 0) || 0}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">Request Dispatch</button>`;
                 }
             }
             if ((req.status === 'PRODUCED' || (stage && stage.includes('DISPATCH'))) && req.status !== 'DISPATCHED') {
@@ -3120,7 +3136,7 @@
         function openIssueMaterialsWizard(reqId) {
             var req = window._currentReqDetails;
             if (!req || req.id !== reqId) req = { id: reqId, productName: 'Request ' + reqId, quantity: '', unit: 'Units' };
-            var productName = String(req.productName || 'Request').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            var productName = String(getRequestProductNameDisplay(req) || 'Request').replace(/</g, '&lt;').replace(/"/g, '&quot;');
             var qty = req.quantity != null ? req.quantity : (req.requestedQty != null ? req.requestedQty : '');
             var unit = String(req.unit || 'Units').replace(/</g, '&lt;').replace(/"/g, '&quot;');
             var reqIdEsc = (req.id || '').replace(/'/g, "\\'");
@@ -3174,7 +3190,7 @@
             if (!req) { showToast('Open a request first (Pending Issue or Issued Items).', 'warning'); return; }
             const totalQty = parseFloat(req.quantity || req.requestedQty || 0) || 0;
             const unit = (req.unit || 'Units').replace(/</g, '&lt;');
-            const productName = String(req.productName || 'Request').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const productName = String(getRequestProductNameDisplay(req) || 'Request').replace(/</g, '&lt;').replace(/"/g, '&quot;');
             const isAlreadyPartial = req.status === 'PARTIALLY_ISSUED' && (req.partialIssuedQty != null || req.partialIssuedQty === 0);
             const alreadyIssued = isAlreadyPartial ? (parseFloat(req.partialIssuedQty) || 0) : 0;
             const remaining = totalQty - alreadyIssued;
@@ -3390,7 +3406,7 @@
                                     <p class="text-[8px] font-black text-blue-600 uppercase leading-none mt-1">${r.type.substring(0, 3)}</p>
                                 </div>
                                 <div class="min-w-0">
-                                    <h4 class="font-black text-gray-800 truncate text-xs leading-tight group-hover:text-blue-600">${r.productName}</h4>
+                                    <h4 class="font-black text-gray-800 truncate text-xs leading-tight group-hover:text-blue-600">${getRequestProductNameDisplay(r)}</h4>
                                     <p class="text-[8px] font-bold text-gray-400 uppercase">By: ${r.requesterName}</p>
                                 </div>
                             </div>
@@ -3423,7 +3439,7 @@
             const actionsArea = document.getElementById('detailsActionsArea');
             const addArea = document.getElementById('additionalRequestArea');
 
-            document.getElementById('detailsTitle').textContent = req.productName;
+            document.getElementById('detailsTitle').textContent = getRequestProductNameDisplay(req);
             const partialBadge = req.status === 'PARTIALLY_ISSUED' && (req.partialIssuedQty != null || req.partialIssuedQty === 0) ? ' <span class="text-[9px] font-black bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded uppercase">PARTIAL ' + req.partialIssuedQty + '/' + (req.quantity || '?') + ' ' + (req.unit || '').replace(/</g, '&lt;') + '</span>' : '';
             document.getElementById('detailsSubtitle').innerHTML = 'REQ #' + String(req.id).replace(/</g, '&lt;') + ' • ' + String(req.status).replace(/</g, '&lt;') + ' • BY ' + String(req.requesterName || '').replace(/</g, '&lt;') + partialBadge;
             document.getElementById('detailsQty').textContent = `${req.quantity} ${req.unit || 'Units'}`;
@@ -3487,7 +3503,7 @@
                 recipeContainer.innerHTML = `
                     <div class="p-4 border border-dashed border-amber-200 rounded-xl bg-amber-50 text-center">
                         <p class="text-[10px] font-bold text-amber-800">No formula items for this product yet.</p>
-                        <p class="text-[9px] text-amber-600 mt-1">Add a formulation for "${(req.productName || '').replace(/</g, '&lt;')}" in Main Inventory → Formulation, or request one via Request New Formula.</p>
+                        <p class="text-[9px] text-amber-600 mt-1">Add a formulation for "${(getRequestProductNameDisplay(req) || '').replace(/</g, '&lt;')}" in Main Inventory → Formulation, or request one via Request New Formula.</p>
                     </div>
                 `;
             }
@@ -4048,7 +4064,7 @@
                                             <span class="text-[8px] font-black bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded uppercase">${req.id}</span>
                                         </div>
                                         ${isCorrection ? `<div class="text-[12px] font-black text-orange-600 mb-1 tracking-tighter uppercase italic">🚨 Correction Request</div>` : ''}
-                                        <h3 class="font-black text-gray-800 truncate text-base group-hover:text-blue-600 transition-colors leading-tight ${isCorrection ? 'text-orange-900 font-black' : ''}">${req.productName}</h3>
+                                        <h3 class="font-black text-gray-800 truncate text-base group-hover:text-blue-600 transition-colors leading-tight ${isCorrection ? 'text-orange-900 font-black' : ''}">${getRequestProductNameDisplay(req)}</h3>
                                         <div class="flex flex-col gap-1 mt-1.5">
                                             <p class="text-[9px] text-gray-400 font-black uppercase">Requester: <span class="text-gray-600">${req.requesterName}</span></p>
                                             ${isCorrection && req.remarks ? `
@@ -4256,7 +4272,7 @@
                 if (data.result === 'success' && data.requests) {
                     const grouped = {};
                     data.requests.forEach(req => {
-                        const prod = req.productName || 'General / R&D';
+                        const prod = getRequestProductNameDisplay(req) || 'General / R&D';
                         if (!grouped[prod]) grouped[prod] = [];
                         grouped[prod].push(req);
                     });
