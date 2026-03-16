@@ -1275,6 +1275,16 @@
                                     </div>
                                 </div>
                                 ` : ''}
+                                ${['SUBMITTED','PENDING','CORRECTION_REQUIRED','ON_HOLD'].includes(req.status) ? `
+                                <div class="mt-3 pt-3 border-t flex gap-2" onclick="event.stopPropagation()">
+                                    <button onclick="event.stopPropagation(); viewRequestDetails('${req.id}'); setTimeout(()=>openEditRequestModal('${req.id}'),600)" class="flex-1 bg-blue-50 text-blue-600 font-black py-2 rounded-lg uppercase text-[9px] border border-blue-100 hover:bg-blue-100 transition-all">✏️ Edit</button>
+                                    <button onclick="event.stopPropagation(); cancelRequest(event, '${req.id}')" class="flex-1 bg-red-50 text-red-500 font-black py-2 rounded-lg uppercase text-[9px] border border-red-100 hover:bg-red-100 transition-all">🛑 Cancel</button>
+                                </div>
+                                ` : (req.status === 'APPROVED' && !((req.currentStage||'').toUpperCase().indexOf('WIP')>=0) ? `
+                                <div class="mt-3 pt-3 border-t flex gap-2" onclick="event.stopPropagation()">
+                                    <button onclick="event.stopPropagation(); cancelRequest(event, '${req.id}')" class="flex-1 bg-red-50 text-red-500 font-black py-2 rounded-lg uppercase text-[9px] border border-red-100 hover:bg-red-100 transition-all">🛑 Cancel Request</button>
+                                </div>
+                                ` : '')}
                             </div>
                         `;
                     }).join('');
@@ -2985,6 +2995,7 @@
                         <button onclick="handleApprovalAction(event, '${req.id}', 'hold')" class="bg-orange-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">⏸️ Hold</button>
                         <button onclick="handleApprovalAction(event, '${req.id}', 'hold_plan')" class="bg-amber-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-amber-600 transition-all">📋 Hold Plan</button>
                         <button onclick="handleApprovalAction(event, '${req.id}', 'reject')" class="bg-red-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-red-700 transition-all">❌ Reject</button>
+                        <button onclick="deleteRequestPermanent(event, '${req.id}')" class="col-span-2 bg-gray-100 text-red-500 font-black py-2 rounded-xl uppercase text-[9px] hover:bg-red-50 hover:text-red-700 transition-all border border-gray-200 mt-1">🗑️ Delete Request Permanently</button>
                     </div>
                 `;
             } else if (userRole === 'Employee' && req.status === 'APPROVED' && stage === 'AWAITING EMPLOYEE CONFIRMATION') {
@@ -3043,6 +3054,27 @@
             if ((req.status === 'PRODUCED' || (stage && stage.includes('DISPATCH'))) && req.status !== 'DISPATCHED') {
                 actionBtns += `<button onclick="openUpdatePackingLabelsModal('${req.id}')" class="flex-1 mt-2 bg-amber-100 text-amber-800 font-bold py-2 rounded-xl uppercase text-[10px] hover:bg-amber-200 transition-all">📦 Update packing & labels</button>`;
             }
+
+            const isRequesterFinal = (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim());
+            const editableStatuses = ['SUBMITTED', 'PENDING', 'CORRECTION_REQUIRED', 'ON_HOLD'];
+            const cancelableStatuses = ['SUBMITTED', 'PENDING', 'APPROVED', 'APPROVE_REQUEST', 'CORRECTION_REQUIRED', 'ON_HOLD'];
+            const finalStatuses = ['COMPLETED', 'CANCELLED', 'DISPATCHED', 'REJECTED'];
+
+            if (isRequesterFinal && !finalStatuses.includes(req.status)) {
+                actionBtns += '<div class="w-full border-t border-gray-100 mt-3 pt-3 grid grid-cols-2 gap-2">';
+                if (editableStatuses.includes(req.status)) {
+                    actionBtns += `<button onclick="openEditRequestModal('${req.id}')" class="bg-blue-50 text-blue-600 font-black py-2.5 rounded-xl uppercase text-[10px] hover:bg-blue-100 transition-all border border-blue-100">✏️ Edit Request</button>`;
+                }
+                if (cancelableStatuses.includes(req.status)) {
+                    actionBtns += `<button onclick="cancelRequest(event, '${req.id}')" class="bg-red-50 text-red-500 font-black py-2.5 rounded-xl uppercase text-[10px] hover:bg-red-100 transition-all border border-red-100">🛑 Cancel Request</button>`;
+                }
+                actionBtns += '</div>';
+            }
+
+            if ((userRole === 'Manager' || userRole === 'Admin') && !finalStatuses.includes(req.status) && !actionBtns.includes('deleteRequestPermanent')) {
+                actionBtns += `<div class="w-full border-t border-gray-100 mt-3 pt-3"><button onclick="deleteRequestPermanent(event, '${req.id}')" class="w-full bg-gray-50 text-red-400 font-black py-2 rounded-xl uppercase text-[9px] hover:bg-red-50 hover:text-red-600 transition-all border border-gray-200">🗑️ Delete Request</button></div>`;
+            }
+
             if (actionsArea) actionsArea.innerHTML = actionBtns;
         }
 
@@ -4419,6 +4451,106 @@
                 if (data.result === 'success') {
                     showToast('Item removed', 'success');
                     viewRequestDetails(id); // Reload details
+                } else {
+                    showToast(userFriendlyError(data.error), 'error');
+                }
+            } catch (e) {
+                showToast(CRITICAL_ACTION_RETRY_MSG, 'warning');
+            }
+        }
+
+        async function deleteRequestPermanent(ev, id) {
+            if (typeof id === 'undefined') { id = ev; ev = null; }
+            if (!confirm('⚠️ PERMANENTLY DELETE this request?\n\nRequest: ' + id + '\n\nThis cannot be undone. The request and all its data will be removed.')) return;
+            const reason = prompt('Reason for deletion (optional):') || '';
+            if (ev && ev.target) ev.target.disabled = true;
+            showToast('Deleting request...', 'info');
+            try {
+                const data = await callBackendPost('delete_request', { id, email: currentUser.email, user: currentUser.name, reason });
+                if (data.result === 'success') {
+                    invalidateViewCache(true);
+                    showToast('Request deleted permanently', 'success');
+                    closeDetails();
+                    refreshCurrentView();
+                } else {
+                    showToast(userFriendlyError(data.error), 'error');
+                    if (ev && ev.target) ev.target.disabled = false;
+                }
+            } catch (e) {
+                showToast(CRITICAL_ACTION_RETRY_MSG, 'warning');
+                if (ev && ev.target) ev.target.disabled = false;
+            }
+        }
+
+        function openEditRequestModal(id) {
+            const req = window._currentReqDetails;
+            if (!req) { showToast('No request data loaded', 'error'); return; }
+            const existing = document.getElementById('editRequestModal');
+            if (existing) existing.remove();
+
+            const safeProduct = (req.productName || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            const safeNotes = (req.notes || req.remarks || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            const modal = document.createElement('div');
+            modal.id = 'editRequestModal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110] fade-in';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl w-full max-w-lg p-8 shadow-2xl mx-4 border-t-8 border-blue-500">
+                    <h2 class="text-xl font-black text-gray-800 mb-1">✏️ Edit Request</h2>
+                    <p class="text-xs text-gray-400 font-bold uppercase tracking-wider mb-6">${String(id).replace(/</g, '&lt;')} &bull; ${(req.type || '').replace(/</g, '&lt;')}</p>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Product Name</label>
+                            <input type="text" id="editReqProduct" value="${safeProduct}" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Quantity</label>
+                                <input type="number" id="editReqQty" step="0.001" value="${req.quantity || req.requestedQty || 0}" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Unit</label>
+                                <input type="text" id="editReqUnit" value="${(req.unit || '').replace(/"/g, '&quot;')}" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" placeholder="Kg, L, Units...">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Notes / Purpose</label>
+                            <textarea id="editReqNotes" rows="3" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-medium outline-none focus:ring-2 focus:ring-blue-500" placeholder="Optional notes...">${safeNotes}</textarea>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 mt-6">
+                        <button onclick="document.getElementById('editRequestModal').remove()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl transition-all uppercase text-xs">Cancel</button>
+                        <button onclick="submitEditRequest('${id}')" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all uppercase text-xs shadow-lg">Save Changes</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        async function submitEditRequest(id) {
+            const product = (document.getElementById('editReqProduct') || {}).value || '';
+            const qty = (document.getElementById('editReqQty') || {}).value || '';
+            const unit = (document.getElementById('editReqUnit') || {}).value || '';
+            const notes = (document.getElementById('editReqNotes') || {}).value || '';
+
+            showToast('Saving changes...', 'info');
+            try {
+                const data = await callBackendPost('edit_request', {
+                    id,
+                    email: currentUser.email,
+                    user: currentUser.name,
+                    productName: product,
+                    quantity: qty,
+                    unit: unit,
+                    notes: notes
+                });
+                if (data.result === 'success') {
+                    const modal = document.getElementById('editRequestModal');
+                    if (modal) modal.remove();
+                    invalidateViewCache(true);
+                    showToast('Request updated!', 'success');
+                    viewRequestDetails(id);
                 } else {
                     showToast(userFriendlyError(data.error), 'error');
                 }
