@@ -6114,7 +6114,7 @@
                                     btn.onclick = (e) => {
                                         e.preventDefault();
                                         closeModal('stockTxModal');
-                                        openDispatchModal(item.id);
+                                        (window.openDispatchModal || openDispatchModal)(item.id);
                                     };
                                     const container = document.getElementById('erp-consume-fields');
                                     if (container) {
@@ -9282,7 +9282,7 @@
                         }
                     };
 
-                    window.openDispatcherModal = openDispatchModal;
+                    window.openDispatchModal = window.openDispatchModal || openDispatchModal;
                     window.showBatchDetails = showBatchDetails;
                     window.openModal = openModal;
                     window.closeModal = closeModal;
@@ -10824,46 +10824,36 @@
                     };
 
                     window.openDispatchModal = function (itemId) {
-                        // Open Sales/Dispatch Modal directly
                         const modal = document.getElementById('dispatchModal');
-                        if (modal) {
-                            // Populate Items
-                            const select = document.getElementById('dispatch-item');
-                            select.innerHTML = '<option value="">Select Finished Good</option>';
-                            (appState.inventory.finishedGoods || []).forEach(fg => {
-                                const opt = document.createElement('option');
-                                opt.value = fg.id;
-                                opt.textContent = fg.name;
-                                select.appendChild(opt);
-                            });
-
-                            // Populate Customers
-                            const custSelect = document.getElementById('dispatch-customer');
-                            custSelect.innerHTML = '<option value="">Select Customer</option>';
-                            (appState.customers || []).forEach(c => {
-                                const opt = document.createElement('option');
-                                opt.value = c.id;
-                                opt.textContent = c.name;
-                                custSelect.appendChild(opt);
-                            });
-
-                            // Set Default Date
-                            document.getElementById('dispatch-date').value = getToday();
-
-                            // Set Selected Item
-                            select.value = itemId;
-
-                            // Trigger Batch Select if function exists
-                            if (typeof window.populateDispatchBatchSelect === 'function') {
-                                window.populateDispatchBatchSelect();
-                            } else if (typeof populateDispatchBatchSelect === 'function') {
-                                populateDispatchBatchSelect();
-                            }
-
-                            openModal('dispatchModal');
-                        } else {
-                            showView('sales-dispatch');
+                        if (!modal) {
+                            if (typeof showView === 'function') showView('sales-dispatch');
+                            return;
                         }
+                        const itemSelect = document.getElementById('dispatch-item');
+                        const custSelect = document.getElementById('dispatch-customer');
+                        if (!itemSelect || !custSelect) return;
+                        itemSelect.innerHTML = '<option value="">Select Finished Good</option>';
+                        (appState.inventory.finishedGoods || []).forEach(fg => {
+                            const opt = document.createElement('option');
+                            opt.value = fg.id;
+                            opt.textContent = fg.name;
+                            itemSelect.appendChild(opt);
+                        });
+                        custSelect.innerHTML = '<option value="">Select Customer</option>';
+                        (appState.customers || []).forEach(c => {
+                            const opt = document.createElement('option');
+                            opt.value = c.id;
+                            opt.textContent = c.name;
+                            custSelect.appendChild(opt);
+                        });
+                        const dateEl = document.getElementById('dispatch-date');
+                        if (dateEl) dateEl.value = typeof getToday === 'function' ? getToday() : new Date().toISOString().slice(0, 10);
+                        const opt = Array.from(itemSelect.options).find(o => o.value == itemId || String(o.value) === String(itemId));
+                        if (opt) itemSelect.value = opt.value;
+                        else if (itemId) itemSelect.value = itemId;
+                        if (typeof populateDispatchBatchSelect === 'function') populateDispatchBatchSelect();
+                        else if (typeof window.populateDispatchBatchSelect === 'function') window.populateDispatchBatchSelect();
+                        (window.openModal || openModal)('dispatchModal');
                     };
 
                     // --- UPDATED INVENTORY TABLE RENDER (FIXED) ---
