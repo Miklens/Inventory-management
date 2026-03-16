@@ -943,6 +943,23 @@
     return { result: 'success' };
   }
 
+  /** Calculate FG stock from transactions (same logic as Main Inventory). Items use openingStock + transactions. */
+  function calculateFGStock(item, transactions) {
+    var open = parseFloat(item.openingStock || item.openingStockBalance || item.stock || 0) || 0;
+    var itemId = item.id;
+    var cat = 'finishedGoods';
+    if (!Array.isArray(transactions)) return Math.max(0, open);
+    var txs = transactions.filter(function (t) {
+      return (t.category === cat || String(t.category || '') === 'finishedGoods') && (t.itemId == itemId || t.itemId === itemId);
+    });
+    txs.forEach(function (t) {
+      var q = parseFloat(t.quantity || 0) || 0;
+      if (['receive', 'stock-take-adj-in', 'production-add', 'produce', 'production-in'].indexOf(String(t.type || '')) >= 0) open += q;
+      else if (['consume', 'stock-take-adj-out', 'production-consume', 'requisition-issue', 'dispatch'].indexOf(String(t.type || '')) >= 0) open -= (q > 0 ? q : -q);
+    });
+    return Math.max(0, open);
+  }
+
   /** Get finished goods and customers from Main Inventory for standalone dispatch (no requisition). */
   async function getInventoryForStandaloneDispatch(params) {
     var latestRef = db.collection('Database').doc('latest');
@@ -953,12 +970,16 @@
     var inv = (payload && payload.inventory) ? payload.inventory : payload;
     var arr = (inv && (inv.finishedGoods || inv.products || [])) || [];
     if (!Array.isArray(arr)) arr = [];
+    var transactions = (payload && payload.transactions) ? payload.transactions : [];
+    if (!Array.isArray(transactions)) transactions = [];
     var customers = (payload && payload.customers) ? payload.customers : [];
     if (!Array.isArray(customers)) customers = [];
     var version = (d && d.latestId) ? d.latestId : null;
     return ok({
       finishedGoods: arr.map(function (i) {
-        return { id: i.id || i.name, name: i.name || i.itemName || String(i.id || ''), unit: i.unit || 'Units', quantity: parseFloat(i.quantity || i.qty || 0) || 0 };
+        var qty = parseFloat(i.quantity || i.qty || 0);
+        if (isNaN(qty) || qty === 0) qty = calculateFGStock(i, transactions);
+        return { id: i.id || i.name, name: i.name || i.itemName || String(i.id || ''), unit: i.unit || 'Units', quantity: Math.max(0, qty) };
       }),
       customers: customers.map(function (c) { return { id: c.id, name: c.name || '', type: c.type || '', location: c.location || '', gst: c.gst || '' }; }),
       version: version
@@ -1021,17 +1042,27 @@
     }
     if (!itemName) itemName = nameStr || productId;
 
-    var remaining = qty;
-    for (var k = 0; k < arr.length && remaining > 0; k++) {
-      var item = arr[k];
-      var m = (String(item.name || '') === itemName || String(item.itemName || '') === itemName || String(item.id || '') === itemName || (itemId != null && (item.id == itemId || item.id === itemId)));
-      if (!m) continue;
-      var current = parseFloat(item.quantity || item.qty || 0) || 0;
-      var deduct = Math.min(remaining, current);
-      item.quantity = item.qty = Math.max(0, current - deduct);
-      remaining -= deduct;
+    var transactions = payload.transactions || [];
+    if (!Array.isArray(transactions)) transactions = [];
+    var matchedItem = null;
+    for (var k = 0; k < arr.length; k++) {
+      var it = arr[k];
+      var m = (String(it.name || '') === itemName || String(it.itemName || '') === itemName || String(it.id || '') === itemName || (itemId != null && (it.id == itemId || it.id === itemId)));
+      if (m) { matchedItem = it; break; }
     }
-    if (remaining > 0) return fail(new Error('Insufficient stock for ' + itemName + '. Shortfall: ' + remaining + ' ' + itemUnit));
+    if (!matchedItem) {
+      for (var j = 0; j < arr.length; j++) {
+        if (String(arr[j].name || arr[j].itemName || arr[j].id || '').toLowerCase().indexOf((itemName || '').toLowerCase()) >= 0) {
+          matchedItem = arr[j]; break;
+        }
+      }
+    }
+    if (!matchedItem) return fail(new Error('Product not found: ' + itemName));
+    var availableStock = calculateFGStock(matchedItem, transactions);
+    if (availableStock < qty) return fail(new Error('Insufficient stock for ' + itemName + '. Available: ' + availableStock.toFixed(3) + ', requested: ' + qty + ' ' + itemUnit));
+    itemId = matchedItem.id;
+    itemName = (matchedItem.name || matchedItem.itemName || String(matchedItem.id || '')).toString().trim();
+    itemUnit = (matchedItem.unit || 'Units').toString().trim();
 
     var custId = customerId;
     var custName = '';
