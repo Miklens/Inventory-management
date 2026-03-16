@@ -1230,6 +1230,11 @@
                 const data = await callBackend('get_my_requests', { email: currentUser.email, light: '1' });
 
                 if (data.requests && data.requests.length > 0) {
+                    data.requests.sort(function (a, b) {
+                        var ta = a.createdDate || a.createdAt || a.id || '';
+                        var tb = b.createdDate || b.createdAt || b.id || '';
+                        return ta > tb ? -1 : ta < tb ? 1 : 0;
+                    });
                     listContainer.innerHTML = data.requests.map(req => {
                         const isApproved = ['APPROVED', 'APPROVE_REQUEST', 'ISSUED', 'RECORDED', 'PRODUCED', 'DISPATCHED'].includes(req.status);
                         const isCorrection = req.status === 'CORRECTION_REQUIRED';
@@ -2300,6 +2305,11 @@
                 if (existingBtn) existingBtn.remove();
 
                 if (data.requests && data.requests.length > 0) {
+                    data.requests.sort(function (a, b) {
+                        var ta = a.createdDate || a.createdAt || a.id || '';
+                        var tb = b.createdDate || b.createdAt || b.id || '';
+                        return ta > tb ? -1 : ta < tb ? 1 : 0;
+                    });
                     const html = data.requests.map(req => {
                         return `
                             <div onclick="viewRequestDetails('${req.id}')" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group fade-in mb-3">
@@ -3899,6 +3909,7 @@
             try {
                 const data = await callBackend('get_formula_requests', { email: currentUser.email, role: currentUser.role || 'Employee' }).catch(() => ({}));
                 const list = data.requests || [];
+                list.sort(function (a, b) { var ta = a.createdAt || a.id || ''; var tb = b.createdAt || b.id || ''; return ta > tb ? -1 : ta < tb ? 1 : 0; });
                 if (list.length === 0) {
                     el.innerHTML = '<p class="text-gray-500 text-sm">No formula requests yet.</p>';
                     return;
@@ -3953,6 +3964,7 @@
                 if (statusFilter) params.status = statusFilter;
                 const data = await callBackend('get_formula_requests', params).catch(() => ({}));
                 const list = data.requests || [];
+                list.sort(function (a, b) { var ta = a.createdAt || a.id || ''; var tb = b.createdAt || b.id || ''; return ta > tb ? -1 : ta < tb ? 1 : 0; });
                 if (list.length === 0) {
                     el.innerHTML = '<p class="text-gray-500 text-center py-8">No formula requests.</p>';
                     return;
@@ -4076,6 +4088,11 @@
                 const data = await callBackend('get_pending_approvals', { email: currentUser.email });
 
                 if (data.requests && data.requests.length > 0) {
+                    data.requests.sort(function (a, b) {
+                        var ta = a.createdDate || a.createdAt || a.id || '';
+                        var tb = b.createdDate || b.createdAt || b.id || '';
+                        return ta > tb ? -1 : ta < tb ? 1 : 0;
+                    });
                     listContainer.innerHTML = data.requests.map(req => {
                         const isCorrection = req.status === 'CORRECTION_REQUIRED';
                         const cardClass = isCorrection
