@@ -174,6 +174,20 @@
     var to = '';
     var subject = '';
 
+    // Gmail threads best when Subject stays constant.
+    // We generate a stable thread subject per Request/Dispatch/Formula so all stage emails stay in one thread.
+    function getThreadSubject() {
+      var rid = (payload.requestId || '').toString().trim();
+      var did = (payload.dispatchId || '').toString().trim();
+      var fid = (payload.formulaRequestId || '').toString().trim();
+      var product = (payload.productName || '').toString().trim();
+      if (rid) return '[MIKLENS REQ-' + rid + '] ' + (product || 'Requisition');
+      if (did) return '[MIKLENS DISPATCH-' + did + '] ' + (product || 'Dispatch');
+      if (fid) return '[MIKLENS FORMULA-' + fid + '] Formula Request';
+      if (type === 'standalone_dispatch_completed') return '[MIKLENS] Dispatch from Stock – ' + (product || 'Item');
+      return '';
+    }
+
     var reqType = (payload.requestType || '').toString().trim();
     var isResearch = reqType.toLowerCase() === 'research';
     var isProduction = reqType.toLowerCase() === 'production' || (!isResearch && reqType !== '');
@@ -508,6 +522,11 @@
     } else if (type === 'request_cancelled') {
       actions.push({ label: 'View App', color: '#6b7280', query: '' });
     }
+
+    // Force stable thread subject so all emails for the same request/dispatch stay in one thread.
+    // Keep event/status information inside the email body (eventTitle/details), not subject.
+    var threadSubject = getThreadSubject();
+    if (threadSubject) subject = threadSubject;
 
     var html = buildHtml(reqId, eventTitle, title, details, color, backendConfig.APP_URL, {
       requestType: reqType,
