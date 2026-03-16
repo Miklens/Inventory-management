@@ -2825,16 +2825,16 @@
                             </table>
                         </div>
                         <div class="mt-4 pt-4 border-t">
-                            <h4 class="font-semibold text-sm text-gray-700 mb-2">Receive History (all receipts: Date, Qty, Supplier, Batch)</h4>
+                            <h4 class="font-semibold text-sm text-gray-700 mb-2">Receive History</h4>
                             <div class="overflow-x-auto max-h-48 overflow-y-auto">
                                 <table class="min-w-full text-xs">
-                                    <thead class="bg-gray-50 sticky top-0"><tr><th class="p-1 text-left">Date</th><th class="p-1 text-right">Qty</th><th class="p-1 text-left">Supplier</th><th class="p-1 text-left">Batch</th><th class="p-1 text-left">Expiry</th></tr></thead>
+                                    <thead class="bg-gray-50 sticky top-0"><tr><th class="p-1 text-left">Date</th><th class="p-1 text-right">Qty</th><th class="p-1 text-left">Supplier</th><th class="p-1 text-left">Batch</th><th class="p-1 text-left">Invoice</th><th class="p-1 text-left">PO</th><th class="p-1 text-left">Reference</th><th class="p-1 text-left">Expiry</th></tr></thead>
                                     <tbody>
                                         ${(function(){
                                             const receives = (appState.transactions || []).filter(t => t.type === 'receive' && String(t.itemId) === String(itemId) && String(t.category || '') === String(category || '')).sort((a,b) => new Date(b.date) - new Date(a.date));
-                                            if (receives.length === 0) return '<tr><td colspan="5" class="p-2 text-gray-500">No receive records.</td></tr>';
-                                            const supplierName = function(id) { if (!id) return '—'; const s = (appState.suppliers || []).find(s => s.id == id); return s ? s.name : id; };
-                                            return receives.map(t => '<tr class="border-b hover:bg-gray-50"><td class="p-1">' + (t.date ? t.date.split('T')[0] : '-') + '</td><td class="p-1 text-right font-mono">' + (t.quantity != null ? Number(t.quantity).toFixed(3) : '-') + '</td><td class="p-1">' + (supplierName(t.supplierId) || '—') + '</td><td class="p-1 font-mono">' + (t.batchNo || '—') + '</td><td class="p-1">' + (t.expiryDate || t.expDate || '—') + '</td></tr>').join('');
+                                            if (receives.length === 0) return '<tr><td colspan="8" class="p-2 text-gray-500">No receive records.</td></tr>';
+                                            const supplierName = function(t) { if (t.supplierName) return t.supplierName; if (!t.supplierId) return '—'; const s = (appState.suppliers || []).find(s => s.id == t.supplierId); return s ? s.name : t.supplierId; };
+                                            return receives.map(t => '<tr class="border-b hover:bg-gray-50"><td class="p-1">' + (t.date ? t.date.split('T')[0] : '-') + '</td><td class="p-1 text-right font-mono">' + (t.quantity != null ? Number(t.quantity).toFixed(3) : '-') + '</td><td class="p-1">' + (supplierName(t) || '—') + '</td><td class="p-1 font-mono">' + (t.batchNo || '—') + '</td><td class="p-1">' + (t.invoiceNo || '—') + '</td><td class="p-1">' + (t.poNo || '—') + '</td><td class="p-1">' + (t.sourceReference || '—') + '</td><td class="p-1">' + (t.expiryDate || t.expDate || '—') + '</td></tr>').join('');
                                         })()}
                                     </tbody>
                                 </table>
@@ -4789,7 +4789,8 @@
                             var grnDate = (document.getElementById('grn-date') && document.getElementById('grn-date').value) || (typeof getToday === 'function' ? getToday() : new Date().toISOString().split('T')[0]);
                             var supplierVal = document.getElementById('grn-supplier') ? document.getElementById('grn-supplier').value : '';
                             var poNo = document.getElementById('grn-po') ? document.getElementById('grn-po').value : '';
-                            var supplierId = supplierVal && supplierVal !== 'adjustment' ? parseFloat(supplierVal) : null;
+                            var suppNum = supplierVal && supplierVal !== 'adjustment' ? parseFloat(supplierVal) : NaN;
+                            var supplierId = !isNaN(suppNum) ? suppNum : null;
                             var dateIso = grnDate + 'T00:00:00.000Z';
                             var lines = document.querySelectorAll('.grn-line-row');
                             var count = 0;
@@ -4810,7 +4811,7 @@
                                 if (/^[0-9.]+$/.test(itemId)) itemId = parseFloat(itemId);
                                 var item = typeof findItem === 'function' ? findItem(category, itemId) : null;
                                 var purchasePrice = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
-                                var tx = { id: Date.now() + Math.random(), itemId: itemId, category: category, type: 'receive', quantity: qty, date: dateIso, supplierId: supplierId, poNo: poNo || null, invoiceNo: poNo || null, batchNo: (batchInput && batchInput.value) || null, expDate: (expiryInput && expiryInput.value) || null, sourceReference: 'GRN-' + (document.getElementById('grn-no') && document.getElementById('grn-no').value ? document.getElementById('grn-no').value : grnNo) };
+                                var tx = { id: Date.now() + Math.random(), itemId: itemId, category: category, type: 'receive', quantity: qty, date: dateIso, supplierId: supplierId, supplierName: (supplierVal && isNaN(suppNum)) ? String(supplierVal) : null, poNo: (poNo || '').trim() || null, invoiceNo: (poNo || '').trim() || null, batchNo: (batchInput && batchInput.value) ? String(batchInput.value).trim() : null, expDate: (expiryInput && expiryInput.value) || null, sourceReference: 'GRN-' + (document.getElementById('grn-no') && document.getElementById('grn-no').value ? document.getElementById('grn-no').value : grnNo) };
                                 if (purchasePrice > 0) { tx.purchasePrice = purchasePrice; if (item && typeof updateWeightedAverageCost === 'function') updateWeightedAverageCost(item, category, qty, purchasePrice, dateIso); }
                                 appState.transactions.push(tx);
                                 count++;
@@ -5468,6 +5469,7 @@
                             let ref = '';
                             if (tx.poNo) ref += `PO:${tx.poNo} `;
                             if (tx.invoiceNo) ref += `Inv:${tx.invoiceNo} `;
+                            if (tx.sourceReference) ref += `Ref:${tx.sourceReference} `;
                             if (tx.requestId) ref += `Req:${tx.requestId} `;
 
                             csvContent += [
@@ -5520,6 +5522,7 @@
                             let ref = '';
                             if (tx.poNo) ref += `PO:${tx.poNo} `;
                             if (tx.invoiceNo) ref += `Inv:${tx.invoiceNo} `;
+                            if (tx.sourceReference) ref += `Ref:${tx.sourceReference} `;
                             if (tx.requestId) ref += `Req:${tx.requestId} `;
 
                             csvContent += [
@@ -6377,6 +6380,7 @@
                             const selectedBatch = document.getElementById('tx-consume-batch')?.value || '';
 
                             let finalTransactions = [];
+                            const cust = (appState.customers || []).find(c => c.id == customerId);
                             const baseTx = {
                                 id: Date.now() + Math.random(),
                                 itemId: itemId,
@@ -6385,6 +6389,7 @@
                                 subtype: purpose,
                                 date: txDate + 'T00:00:00.000Z',
                                 customerId: customerId,
+                                customerName: cust ? cust.name : null,
                                 invoiceNo: invoiceNo,
                                 notes: notes,
                                 userName: currentUserName || 'Guest'
@@ -6480,13 +6485,15 @@
                                     if (item) updateWeightedAverageCost(item, category, quantity, purchasePrice, txDate);
                                 }
                                 const rawSuppId = document.getElementById('tx-supplier').value;
-                                baseTx.supplierId = rawSuppId ? parseFloat(rawSuppId) : null;
-                                baseTx.poNo = document.getElementById('tx-po-no').value || null;
-                                baseTx.invoiceNo = document.getElementById('tx-invoice-no').value || null;
-                                baseTx.batchNo = document.getElementById('tx-batch-no').value || null;
-                                baseTx.mfgDate = document.getElementById('tx-mfg-date').value || null;
-                                const expDate = document.getElementById('tx-exp-date').value || null;
-                                baseTx.expDate = expDate;
+                                const suppNum = rawSuppId ? parseFloat(rawSuppId) : NaN;
+                                baseTx.supplierId = !isNaN(suppNum) ? suppNum : null;
+                                if (rawSuppId && isNaN(suppNum)) baseTx.supplierName = String(rawSuppId);
+                                baseTx.poNo = (document.getElementById('tx-po-no')?.value || '').trim() || null;
+                                baseTx.invoiceNo = (document.getElementById('tx-invoice-no')?.value || '').trim() || null;
+                                baseTx.batchNo = (document.getElementById('tx-batch-no')?.value || '').trim() || null;
+                                baseTx.mfgDate = (document.getElementById('tx-mfg-date')?.value || '').trim() || null;
+                                const expDate = (document.getElementById('tx-exp-date')?.value || '').trim() || null;
+                                baseTx.expDate = expDate || null;
                                 var sourceRef = document.getElementById('tx-source-reference');
                                 baseTx.sourceReference = (sourceRef && sourceRef.value) ? sourceRef.value.trim() : null;
 
@@ -6705,8 +6712,14 @@
                         const formula = appState.formulas.find(f => f.id == formulaId);
                         if (!formula) { showAlert('Selected formula could not be found.'); return; }
 
-                        // Find or create the corresponding finished good item
+                        // Find or create the corresponding finished good item (exact match, then fuzzy)
                         let finishedGoodItem = appState.inventory.finishedGoods.find(item => item.name.toLowerCase() === formula.name.toLowerCase());
+                        if (!finishedGoodItem) {
+                            const fuzzy = getFuzzyMatch(formula.name, 'finishedGoods');
+                            if (fuzzy && fuzzy.item && (fuzzy.score === 0 || fuzzy.score <= Math.floor(Math.max((formula.name || '').length, (fuzzy.item.name || '').length) / 4) + 1)) {
+                                finishedGoodItem = fuzzy.item;
+                            }
+                        }
                         if (!finishedGoodItem) {
                             // If the item doesn't exist, create it. This addresses the user's request.
                             const newId = Date.now() + Math.random();
@@ -7728,16 +7741,16 @@
                             </table>
                         </div>
                         <div class="mt-4 pt-4 border-t">
-                            <h4 class="font-semibold text-sm text-gray-700 mb-2">Receive History (Date, Qty, Supplier, Batch)</h4>
+                            <h4 class="font-semibold text-sm text-gray-700 mb-2">Receive History</h4>
                             <div class="overflow-x-auto max-h-48 overflow-y-auto">
                                 <table class="min-w-full text-xs">
-                                    <thead class="bg-gray-50 sticky top-0"><tr><th class="p-1 text-left">Date</th><th class="p-1 text-right">Qty</th><th class="p-1 text-left">Supplier</th><th class="p-1 text-left">Batch</th><th class="p-1 text-left">Expiry</th></tr></thead>
+                                    <thead class="bg-gray-50 sticky top-0"><tr><th class="p-1 text-left">Date</th><th class="p-1 text-right">Qty</th><th class="p-1 text-left">Supplier</th><th class="p-1 text-left">Batch</th><th class="p-1 text-left">Invoice</th><th class="p-1 text-left">PO</th><th class="p-1 text-left">Reference</th><th class="p-1 text-left">Expiry</th></tr></thead>
                                     <tbody>
                                         ${(function(){
                                             const receives = (appState.transactions || []).filter(t => t.type === 'receive' && String(t.itemId) === String(itemId) && String(t.category || '') === String(category || '')).sort((a,b) => new Date(b.date) - new Date(a.date));
-                                            if (receives.length === 0) return '<tr><td colspan="5" class="p-2 text-gray-500">No receive records.</td></tr>';
-                                            const supplierName = function(id) { if (!id) return '—'; const s = (appState.suppliers || []).find(s => s.id == id); return s ? s.name : id; };
-                                            return receives.map(t => '<tr class="border-b hover:bg-gray-50"><td class="p-1">' + (t.date ? t.date.split('T')[0] : '-') + '</td><td class="p-1 text-right font-mono">' + (t.quantity != null ? Number(t.quantity).toFixed(3) : '-') + '</td><td class="p-1">' + (supplierName(t.supplierId) || '—') + '</td><td class="p-1 font-mono">' + (t.batchNo || '—') + '</td><td class="p-1">' + (t.expiryDate || t.expDate || '—') + '</td></tr>').join('');
+                                            if (receives.length === 0) return '<tr><td colspan="8" class="p-2 text-gray-500">No receive records.</td></tr>';
+                                            const supplierName = function(t) { if (t.supplierName) return t.supplierName; if (!t.supplierId) return '—'; const s = (appState.suppliers || []).find(s => s.id == t.supplierId); return s ? s.name : t.supplierId; };
+                                            return receives.map(t => '<tr class="border-b hover:bg-gray-50"><td class="p-1">' + (t.date ? t.date.split('T')[0] : '-') + '</td><td class="p-1 text-right font-mono">' + (t.quantity != null ? Number(t.quantity).toFixed(3) : '-') + '</td><td class="p-1">' + (supplierName(t) || '—') + '</td><td class="p-1 font-mono">' + (t.batchNo || '—') + '</td><td class="p-1">' + (t.invoiceNo || '—') + '</td><td class="p-1">' + (t.poNo || '—') + '</td><td class="p-1">' + (t.sourceReference || '—') + '</td><td class="p-1">' + (t.expiryDate || t.expDate || '—') + '</td></tr>').join('');
                                         })()}
                                     </tbody>
                                 </table>
@@ -8403,12 +8416,22 @@
                             .sort((a, b) => new Date(b.date) - new Date(a.date))
                             .slice(0, 20);
 
+                        const partyName = (t) => {
+                            if (t.supplierName) return t.supplierName;
+                            if (t.customerName) return t.customerName;
+                            if (t.supplierId != null) { const s = (appState.suppliers || []).find(x => x.id == t.supplierId); return s ? s.name : '-'; }
+                            if (t.customerId != null) { const c = (appState.customers || []).find(x => x.id == t.customerId); return c ? c.name : '-'; }
+                            return '-';
+                        };
+                        const refStr = (t) => [t.invoiceNo, t.poNo, t.sourceReference].filter(Boolean).join(' | ') || '-';
                         container.innerHTML = txs.length ? txs.map(t => `
                 <tr class="border-b hover:bg-gray-50">
                     <td class="p-3">${t.date.split('T')[0]}</td>
-                    <td class="p-3 uppercase font-bold text-xs ${t.type === 'receive' ? 'text-green-600' : 'text-red-600'}">${t.type}</td>
+                    <td class="p-3 uppercase font-bold text-xs ${t.type === 'receive' ? 'text-green-600' : t.type === 'dispatch' ? 'text-purple-600' : 'text-red-600'}">${t.type}</td>
                     <td class="p-3 text-right text-mono font-bold">${t.quantity}</td>
-                    <td class="p-3 text-xs text-gray-500">${t.batchNo || t.invoiceNo || '-'}</td>
+                    <td class="p-3 text-xs">${partyName(t)}</td>
+                    <td class="p-3 text-xs font-mono">${t.batchNo || '-'}</td>
+                    <td class="p-3 text-xs text-gray-600">${refStr(t)}</td>
                     <td class="p-3 text-xs italic text-blue-600">${t.notes || t.subtype || '-'}</td>
                     <td class="p-3 text-xs italic">${t.userName || 'Unknown'}</td>
                     <td class="p-3 text-center">
@@ -8418,7 +8441,7 @@
                         <button onclick="undoTransaction(${t.id}, '${category}')" class="px-2 py-1 bg-orange-100 text-orange-700 rounded hover:bg-orange-200 text-xs font-bold border border-orange-200">Undo</button>
                     </td>
                 </tr>
-            `).join('') : '<tr><td colspan="8" class="p-4 text-center text-gray-400">No transactions found.</td></tr>';
+            `).join('') : '<tr><td colspan="9" class="p-4 text-center text-gray-400">No transactions found.</td></tr>';
 
                         openModal('itemHistoryModal');
                     };
@@ -9114,6 +9137,7 @@
                                 }
 
                                 let finalTransactions = [];
+                                const cust = (appState.customers || []).find(c => c.id == customerId);
                                 const baseTx = {
                                     id: Date.now(),
                                     itemId: itemId,
@@ -9122,6 +9146,7 @@
                                     subtype: purpose,
                                     date: date + 'T00:00:00.000Z',
                                     customerId: customerId,
+                                    customerName: cust ? cust.name : null,
                                     invoiceNo: invoiceNo || null,
                                     notes: notes || ''
                                 };
@@ -10595,10 +10620,16 @@
                         // Logic: Check if batch.itemId maps to an existing item. If not, check by name.
                         let fgItem = findItem('finishedGoods', batch.itemId);
                         if (!fgItem) {
-                            // Try by name
-                            fgItem = appState.inventory.finishedGoods.find(i => i.name === (batch.itemName || (formula ? formula.name : '')));
+                            const lookupName = batch.itemName || (formula ? formula.name : '');
+                            fgItem = appState.inventory.finishedGoods.find(i => (i.name || '').toLowerCase() === (lookupName || '').toLowerCase());
                         }
-
+                        if (!fgItem && (formula || batch.itemName)) {
+                            const lookupName = batch.itemName || (formula ? formula.name : '');
+                            const fuzzy = typeof getFuzzyMatch === 'function' ? getFuzzyMatch(lookupName, 'finishedGoods') : null;
+                            if (fuzzy && fuzzy.item && (fuzzy.score === 0 || fuzzy.score <= Math.floor(Math.max((lookupName || '').length, (fuzzy.item.name || '').length) / 4) + 1)) {
+                                fgItem = fuzzy.item;
+                            }
+                        }
                         if (!fgItem && formula) {
                             // CREATE NEW FINISHED GOOD
                             fgItem = {
@@ -11394,7 +11425,9 @@
                                     <th class="p-3 text-left">Date</th>
                                     <th class="p-3 text-left">Type</th>
                                     <th class="p-3 text-right">Qty</th>
-                                    <th class="p-3 text-left">Batch/Ref</th>
+                                    <th class="p-3 text-left">Supplier/Customer</th>
+                                    <th class="p-3 text-left">Batch</th>
+                                    <th class="p-3 text-left">Invoice/PO/Ref</th>
                                     <th class="p-3 text-left">Reason/Notes</th>
                                     <th class="p-3 text-left">User</th>
                                     <th class="p-3 text-center">Action</th>
@@ -20854,7 +20887,10 @@
                          <table class="min-w-full text-sm">
                             <thead class="bg-gray-100"><tr><th class="p-2 text-left">Date</th><th class="p-2 text-left">Customer</th><th class="p-2 text-right">Qty</th></tr></thead>
                             <tbody>
-                                ${dispatchTxs.length ? dispatchTxs.map(t => `<tr class="border-b"><td class="p-2">${t.date.split('T')[0]}</td><td class="p-2">${t.customerName || 'Internal'}</td><td class="p-2 text-right">-${t.quantity}</td></tr>`).join('') : '<tr><td colspan="3" class="p-2 text-gray-400 italic">No usage.</td></tr>'}
+                                ${dispatchTxs.length ? dispatchTxs.map(t => {
+                                    const custName = t.customerName || (appState.customers || []).find(c => c.id == t.customerId)?.name || 'Internal';
+                                    return `<tr class="border-b"><td class="p-2">${t.date.split('T')[0]}</td><td class="p-2">${custName}</td><td class="p-2 text-right">-${t.quantity}</td></tr>`;
+                                }).join('') : '<tr><td colspan="3" class="p-2 text-gray-400 italic">No usage.</td></tr>'}
                             </tbody>
                          </table>
                     </div>
