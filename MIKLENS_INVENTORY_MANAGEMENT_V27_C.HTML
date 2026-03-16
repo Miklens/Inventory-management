@@ -3827,6 +3827,10 @@
                         providersOrder.push(primary);
                         if (fallback && fallback !== primary) providersOrder.push(fallback);
 
+                        const dataJson = (() => {
+                            try { return JSON.stringify(dataSummary); } catch (e) { return '{"error":"Failed to stringify dataSummary"}'; }
+                        })();
+
                         const basePrompt = [
                             'You are an AI assistant for Miklens Inventory Management.',
                             'You answer questions ONLY using the provided JSON data summary.',
@@ -3834,7 +3838,7 @@
                             'Prefer structured numeric answers, bullet points and small tables in markdown.',
                             '',
                             'DATA SUMMARY (JSON):',
-                            JSON.stringify(dataSummary).slice(0, 6000),
+                            dataJson,
                             '',
                             'QUESTION:',
                             question
@@ -4013,6 +4017,32 @@
                                 const d = startOfDay(now); d.setDate(d.getDate() - 1);
                                 from = new Date(d); to = new Date(d); to.setDate(to.getDate() + 1);
                             } else {
+                                // Try "13 feb 2026" / "13 february 2026"
+                                const monthMap = {
+                                    jan: 0, january: 0,
+                                    feb: 1, february: 1,
+                                    mar: 2, march: 2,
+                                    apr: 3, april: 3,
+                                    may: 4,
+                                    jun: 5, june: 5,
+                                    jul: 6, july: 6,
+                                    aug: 7, august: 7,
+                                    sep: 8, sept: 8, september: 8,
+                                    oct: 9, october: 9,
+                                    nov: 10, november: 10,
+                                    dec: 11, december: 11
+                                };
+                                const mName = text.match(/\b(\d{1,2})\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s+(\d{4})\b/);
+                                if (mName) {
+                                    const d = parseInt(mName[1], 10);
+                                    const mo = monthMap[mName[2]];
+                                    const y = parseInt(mName[3], 10);
+                                    const dt = new Date(y, mo, d);
+                                    if (!isNaN(dt.getTime())) {
+                                        const s = startOfDay(dt);
+                                        from = new Date(s); to = new Date(s); to.setDate(to.getDate() + 1);
+                                    }
+                                }
                                 const m = text.match(/(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{2,4})/);
                                 if (m) {
                                     const d = parseInt(m[1], 10);
@@ -4027,6 +4057,78 @@
                                 }
                             }
                             return { from, to };
+                        }
+
+                        function buildAiDataSummaryForQuestion(qTrim, txSlice) {
+                            const todayStr = (typeof getToday === 'function') ? getToday() : (new Date().toISOString().slice(0, 10));
+                            const selectedDate = todayStr;
+                            const categoryKeys = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
+                            const inventory = appState.inventory || {};
+
+                            const categoryTotals = {};
+                            const items = [];
+
+                            categoryKeys.forEach(cat => {
+                                const list = Array.isArray(inventory[cat]) ? inventory[cat] : [];
+                                let totalValue = 0;
+                                for (let i = 0; i < list.length; i++) {
+                                    const it = list[i] || {};
+                                    let closingStock = null;
+                                    try {
+                                        if (typeof calculateStock === 'function') {
+                                            const res = calculateStock(it, cat, selectedDate);
+                                            closingStock = res && typeof res.closingStock === 'number' ? res.closingStock : null;
+                                        }
+                                    } catch (e) {}
+                                    const unitCost = (it.currentAverageCost != null ? it.currentAverageCost : it.price);
+                                    const cost = (typeof unitCost === 'number' && isFinite(unitCost)) ? unitCost : 0;
+                                    const stock = (typeof closingStock === 'number' && isFinite(closingStock)) ? closingStock : 0;
+                                    const value = Math.max(0, stock) * cost;
+                                    totalValue += value;
+                                    items.push({
+                                        category: cat,
+                                        id: it.id,
+                                        name: it.name,
+                                        unit: it.unit,
+                                        stock: Number(stock.toFixed(3)),
+                                        unitCost: Number(cost.toFixed(4)),
+                                        value: Number(value.toFixed(2)),
+                                        minStockLevel: it.minStockLevel != null ? it.minStockLevel : it.minStockLevel !== undefined ? it.minStockLevel : undefined,
+                                        expiryDate: it.expiryDate || null
+                                    });
+                                }
+                                categoryTotals[cat] = Number(totalValue.toFixed(2));
+                            });
+
+                            // Keep tx slice compact
+                            const txCompact = (txSlice || []).map(t => ({
+                                date: t.date || '',
+                                type: t.type || '',
+                                subtype: t.subtype || '',
+                                category: t.category || '',
+                                itemId: t.itemId,
+                                itemName: t.itemName || '',
+                                quantity: t.quantity,
+                                unit: t.unit || '',
+                                customerName: t.customerName || '',
+                                supplierName: t.supplierName || '',
+                                invoiceNo: t.invoiceNo || '',
+                                reference: t.reference || t.sourceReference || '',
+                                notes: t.notes || ''
+                            }));
+
+                            return {
+                                meta: {
+                                    generatedAt: new Date().toISOString(),
+                                    selectedDate: selectedDate,
+                                    question: qTrim
+                                },
+                                totals: {
+                                    categoryValueINR: categoryTotals
+                                },
+                                items: items, // includes all categories; AI can filter
+                                transactions: txCompact
+                            };
                         }
 
                         async function handleAsk(question) {
@@ -4055,12 +4157,7 @@
                                 txSlice = allTx.slice(-500);
                             }
 
-                            const snapshot = {
-                                inventory: appState.inventory || {},
-                                transactions: txSlice,
-                                suppliers: appState.suppliers || [],
-                                customers: appState.customers || []
-                            };
+                            const snapshot = buildAiDataSummaryForQuestion(qTrim, txSlice);
 
                             const providerHint = providerSelect.value === 'auto' ? null : providerSelect.value;
                             try {
