@@ -672,6 +672,22 @@
                         <option value="">FIFO / Unspecified</option>
                     </select>
                     <p class="text-xs text-gray-500">If unspecified, system consumes based on FIFO.</p>
+                    <!-- Inline Dispatch / Sale (for Finished Goods only) -->
+                    <div id="consume-dispatch-fields" class="hidden mt-4 pt-4 border-t border-blue-200">
+                        <h4 class="font-bold text-sm text-blue-800 mb-2">Sales Dispatch</h4>
+                        <p class="text-xs text-gray-600 mb-2">Select customer and complete dispatch. This will log to Sales & Dispatch.</p>
+                        <div class="flex gap-1 mb-2">
+                            <select id="consume-dispatch-customer" class="flex-1 p-2 border rounded text-sm">
+                                <option value="">Select Customer</option>
+                            </select>
+                            <button type="button" id="consume-add-customer-btn" class="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold" title="Add New Customer">+ New</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mb-2">
+                            <div><label class="block text-xs font-medium">Invoice/DC No</label><input type="text" id="consume-dispatch-invoice" class="w-full p-1 border rounded text-sm" placeholder="Optional"></div>
+                            <div><label class="block text-xs font-medium">Purpose</label><select id="consume-dispatch-purpose" class="w-full p-1 border rounded text-sm"><option value="Sale">Sale</option><option value="Dealer">Dealer</option><option value="Farmer">Farmer</option><option value="Sales Demo">Sales Demo</option><option value="Client">Client</option><option value="Sample">Sample</option><option value="Testing">Testing</option><option value="Transfer">Transfer</option><option value="Buyer">Buyer</option><option value="Estate">Estate</option></select></div>
+                        </div>
+                        <div class="mb-2"><label class="block text-xs font-medium">Notes</label><textarea id="consume-dispatch-notes" class="w-full p-1 border rounded text-sm" rows="1" placeholder="Optional"></textarea></div>
+                    </div>
                 </div>
                 <div id="consumption-calculator" class="hidden">
                     <label class="block text-sm font-medium">Add Individual Consumption Entries</label>
@@ -6027,10 +6043,9 @@
                             titleEl.textContent = `Receive: ${item.name}`;
                             purchasePriceField.classList.remove('hidden');
                             standardPriceDisplay.textContent = `₹${item.price}/${item.unit}`;
-                            // Pre-fill with current average cost as suggestion
+                            document.getElementById('erp-consume-fields').classList.add('hidden');
+                            document.getElementById('tx-subtype-container').classList.add('hidden');
                             document.getElementById('tx-purchase-price').value = item.currentAverageCost || item.price;
-
-                            // Show ERP Fields for Receiving
                             document.getElementById('erp-receive-fields').classList.remove('hidden');
                             populateSupplierSelect();
 
@@ -6068,6 +6083,7 @@
 
                             // Show Batch Selection for Consumption
                             document.getElementById('erp-consume-fields').classList.remove('hidden');
+                            document.getElementById('tx-subtype-container').classList.remove('hidden');
                             populateBatchSelect(item, category);
 
                             // Force refresh of Wastage Options to ensure they appear
@@ -6085,6 +6101,7 @@
                             }
 
                             if (subtypeContainer) {
+                                const dispatchOption = category === 'finishedGoods' ? '<label class="flex items-center col-span-2"><input type="radio" name="tx-subtype" value="dispatch_sale" class="mr-2"> <span class="font-bold text-blue-700">Dispatch / Sale (to Customer)</span></label>' : '';
                                 subtypeContainer.innerHTML = `
                         <label class="block text-sm font-medium mb-2">Consumption Type / Reason:</label>
                         <div class="grid grid-cols-2 gap-2">
@@ -6093,6 +6110,7 @@
                             <label class="flex items-center"><input type="radio" name="tx-subtype" value="expired" class="mr-2"> Expired / Destroyed</label>
                             <label class="flex items-center"><input type="radio" name="tx-subtype" value="unusable" class="mr-2"> Unusable (QC Failed)</label>
                             <label class="flex items-center"><input type="radio" name="tx-subtype" value="other" class="mr-2"> Other</label>
+                            ${dispatchOption}
                         </div>
                     `;
                             }
@@ -6103,31 +6121,37 @@
                                 if (rb) rb.checked = true;
                             }
 
-                            // Add "Quick Sell" button for Finished Goods
+                            // Populate and wire inline dispatch fields for Finished Goods
                             if (category === 'finishedGoods') {
-                                const oldBtn = document.getElementById('fg-quick-sell-btn');
-                                if (oldBtn) oldBtn.remove();
-                                const btn = document.createElement('button');
-                                btn.type = 'button';
-                                btn.id = 'fg-quick-sell-btn';
-                                btn.className = 'mt-4 w-full bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700';
-                                btn.textContent = 'Go to New Sale / Dispatch';
-                                btn.dataset.itemId = String(item.id);
-                                btn.onclick = function () {
-                                    const id = this.dataset.itemId;
-                                    (window.closeModal || closeModal)('stockTxModal');
-                                    // Ensure sales-dispatch view loads (sets full openDispatchModal), then open modal
-                                    if (typeof showView === 'function') showView('sales-dispatch');
-                                    setTimeout(function () {
-                                        if (typeof window.openDispatchModal === 'function') {
-                                            window.openDispatchModal(id);
-                                        } else if (typeof openDispatchModal === 'function') {
-                                            openDispatchModal(id);
-                                        }
-                                    }, 350);
-                                };
-                                const container = document.getElementById('erp-consume-fields');
-                                if (container) container.appendChild(btn);
+                                populateConsumeDispatchCustomer();
+                                const dispatchFields = document.getElementById('consume-dispatch-fields');
+                                const addCustBtn = document.getElementById('consume-add-customer-btn');
+                                if (addCustBtn) addCustBtn.onclick = () => openCustomerModal();
+                                subtypeContainer.querySelectorAll('input[name="tx-subtype"]').forEach(rb => {
+                                    rb.addEventListener('change', function () {
+                                        const isDispatch = this.value === 'dispatch_sale';
+                                        if (dispatchFields) dispatchFields.classList.toggle('hidden', !isDispatch);
+                                        const custSelect = document.getElementById('consume-dispatch-customer');
+                                        if (custSelect) custSelect.required = isDispatch;
+                                        const calc = document.getElementById('consumption-calculator');
+                                        if (calc) calc.classList.toggle('hidden', isDispatch);
+                                        const qtyInput = document.getElementById('tx-quantity');
+                                        if (qtyInput) qtyInput.placeholder = isDispatch ? 'Enter quantity to dispatch' : '';
+                                        const submitBtn = document.querySelector('#stock-tx-form button[type="submit"]');
+                                        if (submitBtn) submitBtn.textContent = isDispatch ? 'Record Dispatch' : 'Record';
+                                    });
+                                });
+                                if (dispatchFields) {
+                                    const checked = document.querySelector('input[name="tx-subtype"]:checked');
+                                    const isDispatch = checked && checked.value === 'dispatch_sale';
+                                    dispatchFields.classList.toggle('hidden', !isDispatch);
+                                    const custSelect = document.getElementById('consume-dispatch-customer');
+                                    if (custSelect) custSelect.required = isDispatch;
+                                    const calc = document.getElementById('consumption-calculator');
+                                    if (calc) calc.classList.toggle('hidden', isDispatch);
+                                    const submitBtn = document.querySelector('#stock-tx-form button[type="submit"]');
+                                    if (submitBtn) submitBtn.textContent = isDispatch ? 'Record Dispatch' : 'Record';
+                                }
                             }
                         } else {
                             calculator.classList.add('hidden');
@@ -6136,6 +6160,15 @@
                         }
                         renderConsumptionList();
                         openModal('stockTxModal');
+                    }
+
+                    function populateConsumeDispatchCustomer() {
+                        const select = document.getElementById('consume-dispatch-customer');
+                        if (!select) return;
+                        const cur = select.value;
+                        select.innerHTML = '<option value="">Select Customer</option>' +
+                            (appState.customers || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+                        if (cur) select.value = cur;
                     }
 
                     function populateSupplierSelect() {
@@ -6317,11 +6350,74 @@
                         e.preventDefault();
                         if (!checkPermission()) return;
                         const txDate = document.getElementById('tx-date').value;
-                        const quantity = parseFloat(document.getElementById('tx-quantity').value);
+                        let quantity = parseFloat(document.getElementById('tx-quantity').value);
                         const purchasePrice = parseFloat(document.getElementById('tx-purchase-price').value) || 0;
                         const itemId = parseFloat(document.getElementById('tx-item-id').value);
                         const category = document.getElementById('tx-item-category').value;
-                        const type = document.getElementById('tx-type').value;
+                        let type = document.getElementById('tx-type').value;
+                        const subtypeEl = document.querySelector('input[name="tx-subtype"]:checked');
+                        const subtype = subtypeEl ? subtypeEl.value : '';
+
+                        // --- INLINE DISPATCH (from Consume modal) ---
+                        if (type === 'consume' && subtype === 'dispatch_sale' && category === 'finishedGoods') {
+                            const customerId = parseFloat(document.getElementById('consume-dispatch-customer')?.value);
+                            if (isNaN(customerId)) { showAlert("Please select a customer."); return; }
+                            if (quantity <= 0) { showAlert("Quantity must be positive."); return; }
+                            const item = findItem(category, itemId);
+                            if (!item) { showAlert("Invalid item."); return; }
+                            const calcStock = window.calculateStock || (typeof calculateStock === 'function' ? calculateStock : null);
+                            const stock = calcStock ? calcStock(item, category, txDate) : { closingStock: 0 };
+                            if (stock.closingStock < quantity) {
+                                showAlert(`Insufficient stock! Current: ${stock.closingStock.toFixed(3)} ${item.unit}`);
+                                return;
+                            }
+                            const invoiceNo = document.getElementById('consume-dispatch-invoice')?.value || null;
+                            const purpose = document.getElementById('consume-dispatch-purpose')?.value || 'Sale';
+                            const notes = document.getElementById('consume-dispatch-notes')?.value || '';
+                            const selectedBatch = document.getElementById('tx-consume-batch')?.value || '';
+
+                            let finalTransactions = [];
+                            const baseTx = {
+                                id: Date.now() + Math.random(),
+                                itemId: itemId,
+                                category: 'finishedGoods',
+                                type: 'dispatch',
+                                subtype: purpose,
+                                date: txDate + 'T00:00:00.000Z',
+                                customerId: customerId,
+                                invoiceNo: invoiceNo,
+                                notes: notes,
+                                userName: currentUserName || 'Guest'
+                            };
+
+                            if (selectedBatch) {
+                                baseTx.quantity = quantity;
+                                baseTx.batchNo = selectedBatch;
+                                finalTransactions.push(baseTx);
+                            } else {
+                                const allocFn = window.allocateStock || (typeof allocateStock === 'function' ? allocateStock : null);
+                                const allocation = allocFn ? allocFn(item, 'finishedGoods', quantity, 'FEFO') : [{ quantity: quantity, batchNo: null }];
+                                allocation.forEach((alloc, idx) => {
+                                    const splitTx = { ...baseTx };
+                                    splitTx.id = Date.now() + Math.random() + idx;
+                                    splitTx.quantity = alloc.quantity;
+                                    splitTx.batchNo = alloc.batchNo;
+                                    finalTransactions.push(splitTx);
+                                });
+                                if (finalTransactions.length === 0) {
+                                    baseTx.quantity = quantity;
+                                    finalTransactions.push(baseTx);
+                                }
+                            }
+
+                            finalTransactions.forEach(tx => appState.transactions.push(tx));
+                            saveState();
+                            logActivity('Dispatch', `Dispatched ${quantity} of ${item.name} to customer. Purpose: ${purpose} (${finalTransactions.length} batches)`);
+                            closeModal('stockTxModal');
+                            showAlert("Dispatch recorded. Logged to Sales & Dispatch.");
+                            if (typeof showView === 'function') showView('sales-dispatch');
+                            return;
+                        }
 
                         // --- AUTO ALLOCATION LOGIC ---
                         // If type is Consume or Dispatch, and NO specific batch is selected, we auto-allocate.
@@ -7886,7 +7982,15 @@
                                 // Intelligent View Refresh
                                 // If Dispatch Modal is open, refresh its dropdown instead of changing view
                                 const dispatchModal = document.getElementById('dispatchModal');
-                                if (dispatchModal && !dispatchModal.classList.contains('hidden') && dispatchModal.classList.contains('flex')) {
+                                const stockTxModal = document.getElementById('stockTxModal');
+                                const consumeCustSelect = document.getElementById('consume-dispatch-customer');
+                                if (consumeCustSelect && stockTxModal && !stockTxModal.classList.contains('hidden')) {
+                                    const sel = consumeCustSelect.value;
+                                    consumeCustSelect.innerHTML = '<option value="">Select Customer</option>' +
+                                        (appState.customers || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+                                    if (!id) consumeCustSelect.value = (appState.customers && appState.customers.length) ? appState.customers[appState.customers.length - 1].id : '';
+                                    else if (sel) consumeCustSelect.value = sel;
+                                } else if (dispatchModal && !dispatchModal.classList.contains('hidden') && dispatchModal.classList.contains('flex')) {
                                     // Refresh Dropdown
                                     const custSelect = document.getElementById('dispatch-customer');
                                     if (custSelect) {
