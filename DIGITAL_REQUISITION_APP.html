@@ -541,23 +541,52 @@
             showToast('Logging in...', 'info');
 
             try {
-                const data = await callBackendPost('login', { email: email, password: password });
-                if (data.result === 'success') {
-                    currentUser = data.user;
+                // When using Firebase backend, authenticate with Firebase Auth first,
+                // then load role/profile from Firestore Users/{uid}.
+                if (USE_FIREBASE && window.firebase && firebase.auth && firebase.firestore) {
+                    await firebase.auth().signInWithEmailAndPassword(email, password);
+                    const authUser = firebase.auth().currentUser;
+                    if (!authUser) {
+                        throw new Error('Login failed. Please try again.');
+                    }
+                    const db = firebase.firestore();
+                    const snap = await db.collection('Users').doc(authUser.uid).get();
+                    if (!snap.exists) {
+                        throw new Error('Not authorized. Ask admin to add your user profile in Firestore.');
+                    }
+                    const profile = snap.data() || {};
+                    currentUser = {
+                        email: profile.Email || authUser.email || email,
+                        name: profile.Name || authUser.email || email,
+                        role: profile.Role || 'Viewer',
+                        department: profile.Department || ''
+                    };
                     currentUser.role = normalizeRole(currentUser.role);
                     localStorage.setItem('miklens_user', JSON.stringify(currentUser));
                     localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
                     showApp();
+                    startAutoRefresh();
                 } else {
-                    document.getElementById('loginError').textContent = userFriendlyError(data.error) || 'Invalid credentials';
-                    document.getElementById('loginError').classList.remove('hidden');
-                    showToast('Login failed', 'error');
+                    // Fallback: legacy Apps Script backend login (no Firebase)
+                    const data = await callBackendPost('login', { email: email, password: password });
+                    if (data.result === 'success') {
+                        currentUser = data.user;
+                        currentUser.role = normalizeRole(currentUser.role);
+                        localStorage.setItem('miklens_user', JSON.stringify(currentUser));
+                        localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
+                        showApp();
+                    } else {
+                        document.getElementById('loginError').textContent = userFriendlyError(data.error) || 'Invalid credentials';
+                        document.getElementById('loginError').classList.remove('hidden');
+                        showToast('Login failed', 'error');
+                    }
                 }
             } catch (error) {
                 console.error(error);
-                document.getElementById('loginError').textContent = USE_FIREBASE ? 'Connection error. Check Firebase config.' : 'Connection error. Check System URL.';
+                const msg = (error && error.message) ? error.message : (USE_FIREBASE ? 'Connection error. Check Firebase config.' : 'Connection error. Check System URL.');
+                document.getElementById('loginError').textContent = msg;
                 document.getElementById('loginError').classList.remove('hidden');
-                showToast('Connection error.', 'error');
+                showToast('Login failed.', 'error');
             }
         }
 
