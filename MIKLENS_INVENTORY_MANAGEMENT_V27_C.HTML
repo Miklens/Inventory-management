@@ -4136,6 +4136,151 @@
                             const qTrim = question.trim();
                             appendMessage('user', qTrim);
                             input.value = '';
+                            const qLower = qTrim.toLowerCase();
+
+                            // 1) Deterministic answers for key questions (no AI call)
+                            // 1.a) Items below minimum stock level
+                            if (qLower.includes('below minimum stock') || qLower.includes('below min stock')) {
+                                const todayStr = (typeof getToday === 'function') ? getToday() : (new Date().toISOString().slice(0, 10));
+                                const cats = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
+                                const rows = [];
+                                cats.forEach(cat => {
+                                    const list = (appState.inventory && Array.isArray(appState.inventory[cat])) ? appState.inventory[cat] : [];
+                                    list.forEach(it => {
+                                        if (it.minStockLevel == null || isNaN(it.minStockLevel)) return;
+                                        let closing = 0;
+                                        try {
+                                            if (typeof calculateStock === 'function') {
+                                                const res = calculateStock(it, cat, todayStr);
+                                                if (res && typeof res.closingStock === 'number') closing = res.closingStock;
+                                            }
+                                        } catch (e) {}
+                                        if (closing < it.minStockLevel) {
+                                            rows.push({
+                                                category: cat,
+                                                name: it.name || '',
+                                                stock: closing,
+                                                min: it.minStockLevel,
+                                                unit: it.unit || ''
+                                            });
+                                        }
+                                    });
+                                });
+                                if (!rows.length) {
+                                    appendMessage('assistant', 'AI:\n<br><span class="text-xs text-gray-600">No items are currently below their minimum stock level.</span>');
+                                    return;
+                                }
+                                let html = 'AI:<br><table class="mt-1 text-xs border-collapse w-full"><thead><tr><th class="border px-1 py-[2px] text-left">Category</th><th class="border px-1 py-[2px] text-left">Item</th><th class="border px-1 py-[2px] text-right">Stock</th><th class="border px-1 py-[2px] text-right">Min</th><th class="border px-1 py-[2px] text-left">Unit</th></tr></thead><tbody>';
+                                rows.forEach(r => {
+                                    html += `<tr><td class="border px-1 py-[2px]">${r.category}</td><td class="border px-1 py-[2px]">${r.name}</td><td class="border px-1 py-[2px] text-right">${r.stock.toFixed(3)}</td><td class="border px-1 py-[2px] text-right">${r.min}</td><td class="border px-1 py-[2px]">${r.unit}</td></tr>`;
+                                });
+                                html += '</tbody></table>';
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
+                            // 1.b) Stock value by category
+                            if (qLower.includes('stock value by category') || (qLower.includes('stock value') && qLower.includes('category'))) {
+                                const todayStr = (typeof getToday === 'function') ? getToday() : (new Date().toISOString().slice(0, 10));
+                                const cats = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
+                                const totals = {};
+                                cats.forEach(cat => {
+                                    const list = (appState.inventory && Array.isArray(appState.inventory[cat])) ? appState.inventory[cat] : [];
+                                    let total = 0;
+                                    list.forEach(it => {
+                                        let closing = 0;
+                                        try {
+                                            if (typeof calculateStock === 'function') {
+                                                const res = calculateStock(it, cat, todayStr);
+                                                if (res && typeof res.closingStock === 'number') closing = res.closingStock;
+                                            }
+                                        } catch (e) {}
+                                        const unitCost = (it.currentAverageCost != null ? it.currentAverageCost : it.price);
+                                        const cost = (typeof unitCost === 'number' && isFinite(unitCost)) ? unitCost : 0;
+                                        const value = Math.max(0, closing) * cost;
+                                        total += value;
+                                    });
+                                    totals[cat] = total;
+                                });
+                                const entries = Object.keys(totals).map(cat => ({ cat, value: totals[cat] || 0 }));
+                                entries.sort((a, b) => b.value - a.value);
+                                const top = entries[0];
+                                let html = 'AI:<br><p class="text-xs mb-1">Approximate stock value by category (₹):</p><ul class="text-xs list-disc pl-4">';
+                                entries.forEach(e => {
+                                    html += `<li>${e.cat}: ₹ ${e.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</li>`;
+                                });
+                                html += '</ul>';
+                                if (top) {
+                                    html += `<p class="text-xs mt-1 font-semibold">Highest value category: ${top.cat} (₹ ${top.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}).</p>`;
+                                }
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
+                            // 1.c) Current stock of specific item
+                            if (qLower.startsWith('current stock of') || qLower.startsWith('stock of')) {
+                                const namePart = qTrim.replace(/current stock of/i, '').replace(/stock of/i, '').trim().toLowerCase();
+                                const todayStr = (typeof getToday === 'function') ? getToday() : (new Date().toISOString().slice(0, 10));
+                                const cats = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
+                                let best = null;
+                                cats.forEach(cat => {
+                                    const list = (appState.inventory && Array.isArray(appState.inventory[cat])) ? appState.inventory[cat] : [];
+                                    list.forEach(it => {
+                                        const nm = String(it.name || '').toLowerCase();
+                                        if (!nm || nm.indexOf(namePart) < 0) return;
+                                        let closing = 0;
+                                        try {
+                                            if (typeof calculateStock === 'function') {
+                                                const res = calculateStock(it, cat, todayStr);
+                                                if (res && typeof res.closingStock === 'number') closing = res.closingStock;
+                                            }
+                                        } catch (e) {}
+                                        if (!best || closing > best.stock) {
+                                            best = {
+                                                category: cat,
+                                                name: it.name || '',
+                                                stock: closing,
+                                                unit: it.unit || ''
+                                            };
+                                        }
+                                    });
+                                });
+                                if (!best) {
+                                    appendMessage('assistant', `AI:<br><span class="text-xs text-gray-600">I could not find any item matching "${namePart}".</span>`);
+                                    return;
+                                }
+                                appendMessage('assistant', `AI:<br><span class="text-xs">Current stock of <strong>${best.name}</strong> (${best.category}) is <strong>${best.stock.toFixed(3)} ${best.unit}</strong>.</span>`);
+                                return;
+                            }
+
+                            // 1.d) Today / date transactions
+                            if (qLower.includes('today transaction') || qLower.includes('todays transaction') || qLower.includes('today\'s transaction')) {
+                                const allTx = appState.transactions || [];
+                                const todayStr = (typeof getToday === 'function') ? getToday() : (new Date().toISOString().slice(0, 10));
+                                const from = new Date(todayStr);
+                                const to = new Date(todayStr); to.setDate(to.getDate() + 1);
+                                const tx = allTx.filter(t => {
+                                    if (!t.date) return false;
+                                    const d = new Date(t.date);
+                                    return d >= from && d < to;
+                                });
+                                if (!tx.length) {
+                                    appendMessage('assistant', 'AI:<br><span class="text-xs text-gray-600">No transactions found for today.</span>');
+                                    return;
+                                }
+                                let html = 'AI:<br><p class="text-xs mb-1">Today\'s transactions:</p><table class="mt-1 text-[11px] border-collapse w-full"><thead><tr><th class="border px-1 py-[2px] text-left">Time</th><th class="border px-1 py-[2px] text-left">Type</th><th class="border px-1 py-[2px] text-left">Item</th><th class="border px-1 py-[2px] text-right">Qty</th><th class="border px-1 py-[2px] text-left">Customer/Supplier</th></tr></thead><tbody>';
+                                tx.forEach(t => {
+                                    const timeStr = (t.date || '').split('T')[1] || '';
+                                    const name = t.itemName || '';
+                                    const party = t.customerName || t.supplierName || '';
+                                    html += `<tr><td class="border px-1 py-[2px]">${timeStr}</td><td class="border px-1 py-[2px]">${t.type || ''}</td><td class="border px-1 py-[2px]">${name}</td><td class="border px-1 py-[2px] text-right">${(t.quantity || 0).toFixed ? t.quantity.toFixed(3) : t.quantity}</td><td class="border px-1 py-[2px]">${party}</td></tr>`;
+                                });
+                                html += '</tbody></table>';
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
+                            // If not handled above, fall back to AI
                             appendMessage('assistant', '<span class="text-gray-500 text-xs">Thinking...</span>');
 
                             // Prepare data summary with smart slicing for dates
