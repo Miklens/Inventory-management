@@ -1577,11 +1577,23 @@
                     }
                     if (errEl) errEl.classList.add('hidden');
                     try {
-                        var data = await window.FirebaseBackend.callBackend('login', { email: email, password: password });
-                        if (data && data.result === 'success' && data.user) {
-                            var user = data.user;
+                        // Prefer Firebase Auth + Firestore profile when using Firebase backend.
+                        if (window.firebase && firebase.auth && firebase.firestore) {
+                            await firebase.auth().signInWithEmailAndPassword(email, password);
+                            var authUser = firebase.auth().currentUser;
+                            if (!authUser) throw new Error('Login failed. Please try again.');
+                            var db = firebase.firestore();
+                            var snap = await db.collection('Users').doc(authUser.uid).get();
+                            if (!snap.exists) throw new Error('Not authorized. Ask admin to add your user profile in Firestore.');
+                            var profile = snap.data() || {};
+                            var user = {
+                                email: profile.Email || authUser.email || email,
+                                name: profile.Name || authUser.email || email,
+                                role: profile.Role || 'Viewer',
+                                department: profile.Department || ''
+                            };
                             var roleSlug = mapFirebaseRoleToSlug(user.role);
-                            var toStore = { email: user.email, name: user.name, role: user.role }; if (user.uid) toStore.uid = user.uid;
+                            var toStore = { email: user.email, name: user.name, role: user.role, uid: authUser.uid };
                             sessionStorage.setItem('INVENTORY_USER', JSON.stringify(toStore));
                             sessionStorage.setItem('INVENTORY_LAST_ACTIVITY', Date.now().toString());
                             if (typeof window.setInventoryUser === 'function') window.setInventoryUser(user.name || user.email, roleSlug);
@@ -1594,7 +1606,26 @@
                                 if (typeof showAlert === 'function') showAlert('Welcome, ' + (user.name || user.email) + '!', 'Logged in');
                             })();
                         } else {
-                            if (errEl) { errEl.textContent = (data && data.error) ? data.error : 'Invalid email or password.'; errEl.classList.remove('hidden'); }
+                            // Fallback: legacy FirebaseBackend login (should not be used with locked rules).
+                            var data = await window.FirebaseBackend.callBackend('login', { email: email, password: password });
+                            if (data && data.result === 'success' && data.user) {
+                                var user2 = data.user;
+                                var roleSlug2 = mapFirebaseRoleToSlug(user2.role);
+                                var toStore2 = { email: user2.email, name: user2.name, role: user2.role }; if (user2.uid) toStore2.uid = user2.uid;
+                                sessionStorage.setItem('INVENTORY_USER', JSON.stringify(toStore2));
+                                sessionStorage.setItem('INVENTORY_LAST_ACTIVITY', Date.now().toString());
+                                if (typeof window.setInventoryUser === 'function') window.setInventoryUser(user2.name || user2.email, roleSlug2);
+                                if (typeof window.loginAs === 'function') window.loginAs(roleSlug2, true);
+                                closeModal('loginModal');
+                                if (typeof window.updateLoginButton === 'function') window.updateLoginButton();
+                                (async function () {
+                                    try { if (typeof fetchFromCloud === 'function') await fetchFromCloud(); } catch (e) { }
+                                    if (typeof renderDashboard === 'function') renderDashboard();
+                                    if (typeof showAlert === 'function') showAlert('Welcome, ' + (user2.name || user2.email) + '!', 'Logged in');
+                                })();
+                            } else {
+                                if (errEl) { errEl.textContent = (data && data.error) ? data.error : 'Invalid email or password.'; errEl.classList.remove('hidden'); }
+                            }
                         }
                     } catch (e) {
                         if (errEl) { errEl.textContent = (e.message || 'Login failed'); errEl.classList.remove('hidden'); }
