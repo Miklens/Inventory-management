@@ -345,80 +345,102 @@
     return { to: to, subject: subject, html: html, cc: cc || '' };
   }
 
-  function sendEmailViaAppsScript(payload) {
+  function sendEmailViaAppsScript(payload, _retryCount) {
     var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
     var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
     if (!url || !secret) {
       console.warn('Email skipped: APP_SCRIPT_EMAIL_URL or APP_SCRIPT_EMAIL_SECRET not set in config.');
-      return;
+      return Promise.resolve(false);
     }
     if (!payload || !payload.to) {
       console.warn('Email skipped: no recipient (to). Check Manager Email on the requisition or add a user with Role Manager/Admin in Firestore Users.');
-      return;
+      return Promise.resolve(false);
     }
-    try {
-      var data = {
-        secret: secret,
-        to: payload.to,
-        subject: payload.subject || '',
-        html: payload.html || ''
-      };
-      if (payload.cc && String(payload.cc).trim()) data.cc = String(payload.cc).trim();
-      var payloadStr = JSON.stringify(data);
-      /* Form POST in iframe. Email sends; 403 in console is from iframe loading script response – harmless. */
-      var iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
-      iframe.name = 'appsScriptEmail_' + Date.now();
-      document.body.appendChild(iframe);
-      var form = document.createElement('form');
-      form.action = url;
-      form.method = 'POST';
-      form.target = iframe.name;
-      var input = document.createElement('input');
-      input.name = 'payload';
-      input.value = payloadStr;
-      form.appendChild(input);
-      document.body.appendChild(form);
-      form.submit();
-      console.log('Email sent (form POST) to:', payload.to);
-      setTimeout(function () {
-        try { document.body.removeChild(form); document.body.removeChild(iframe); } catch (e) {}
-      }, 3000);
-    } catch (e) {
-      console.warn('Apps Script email failed', e);
-    }
+    var attempt = _retryCount || 0;
+    var MAX_RETRIES = 2;
+    var data = {
+      secret: secret,
+      to: payload.to,
+      subject: payload.subject || '',
+      html: payload.html || ''
+    };
+    if (payload.cc && String(payload.cc).trim()) data.cc = String(payload.cc).trim();
+
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(data),
+      redirect: 'follow'
+    })
+    .then(function (resp) {
+      if (resp.ok) {
+        return resp.text().then(function (txt) {
+          try {
+            var j = JSON.parse(txt);
+            if (j.ok) {
+              console.log('%c[EMAIL OK] Sent to: ' + payload.to + ' | Subject: ' + (payload.subject || '').substring(0, 60), 'color:green;font-weight:bold');
+              return true;
+            }
+            console.warn('[EMAIL FAIL] Server response:', j);
+            return false;
+          } catch (e) {
+            console.log('[EMAIL] Response (non-JSON):', txt.substring(0, 200));
+            return true;
+          }
+        });
+      }
+      console.warn('[EMAIL FAIL] HTTP', resp.status, 'to:', payload.to);
+      if (attempt < MAX_RETRIES) {
+        console.log('[EMAIL] Retrying (' + (attempt + 1) + '/' + MAX_RETRIES + ') in 2s...');
+        return new Promise(function (resolve) {
+          setTimeout(function () { resolve(sendEmailViaAppsScript(payload, attempt + 1)); }, 2000);
+        });
+      }
+      return false;
+    })
+    .catch(function (err) {
+      if (err.message && err.message.indexOf('opaque') >= 0) {
+        console.log('%c[EMAIL] Sent to: ' + payload.to + ' (no-cors, response opaque – likely delivered)', 'color:green');
+        return true;
+      }
+      console.warn('[EMAIL FAIL] Network error for', payload.to, err);
+      if (attempt < MAX_RETRIES) {
+        console.log('[EMAIL] Retrying (' + (attempt + 1) + '/' + MAX_RETRIES + ') via no-cors fallback...');
+        return fetch(url, {
+          method: 'POST',
+          body: JSON.stringify(data),
+          mode: 'no-cors',
+          redirect: 'follow'
+        }).then(function () {
+          console.log('%c[EMAIL] Sent to: ' + payload.to + ' (no-cors fallback)', 'color:green');
+          return true;
+        }).catch(function (err2) {
+          console.warn('[EMAIL FAIL] All attempts failed for', payload.to, err2);
+          return false;
+        });
+      }
+      return false;
+    });
   }
 
-  /** Log that this employee submitted a request (for reminder: only remind those who have not requested in 2 days). */
   function logRequestToReminderSheet(email, name) {
     var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
     var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
     if (!url || !secret || !email) return;
-    try {
-      var payloadStr = JSON.stringify({
-        secret: secret,
-        action: 'log_request',
-        email: String(email).toLowerCase().trim(),
-        name: String(name || '').trim()
-      });
-      var iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
-      iframe.name = 'appsScriptLog_' + Date.now();
-      document.body.appendChild(iframe);
-      var form = document.createElement('form');
-      form.action = url;
-      form.method = 'POST';
-      form.target = iframe.name;
-      var input = document.createElement('input');
-      input.name = 'payload';
-      input.value = payloadStr;
-      form.appendChild(input);
-      document.body.appendChild(form);
-      form.submit();
-      setTimeout(function () {
-        try { document.body.removeChild(form); document.body.removeChild(iframe); } catch (e) {}
-      }, 2000);
-    } catch (e) {}
+    var data = {
+      secret: secret,
+      action: 'log_request',
+      email: String(email).toLowerCase().trim(),
+      name: String(name || '').trim()
+    };
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(data),
+      redirect: 'follow'
+    }).catch(function () {
+      fetch(url, { method: 'POST', body: JSON.stringify(data), mode: 'no-cors', redirect: 'follow' }).catch(function () {});
+    });
   }
 
   /** Optional: push to NotificationQueue for in-app notifications; if Apps Script URL is set, also send email for free. */
@@ -435,7 +457,7 @@
         try {
           var emailPayload = await buildEmailContent(type, data);
           if (emailPayload && emailPayload.to) {
-            sendEmailViaAppsScript(emailPayload);
+            await sendEmailViaAppsScript(emailPayload);
           } else if (!emailPayload || !emailPayload.to) {
             console.warn('Email skipped: no recipient for type=', type, '- set Manager Email on the request or add Manager/Admin users in Firestore.');
           }
