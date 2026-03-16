@@ -410,6 +410,15 @@
                         Cost Calculator
                     </a>
 
+                    <!-- AI Insights (Admin / Manager only) -->
+                    <a href="#" data-view="ai-insights" class="sidebar-link role-admin flex items-center p-4 hover:bg-gray-700" title="AI Insights & Analytics (Admin / Manager)">
+                        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        AI insights
+                    </a>
+
                     <a href="#" data-view="user-management" class="sidebar-link role-admin flex items-center p-4 hover:bg-gray-700 text-emerald-300" title="Add and manage login users (Admin only)">
                         <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
@@ -509,6 +518,7 @@
 
                     <div id="data-management-view" class="view"></div>
                     <div id="calculator-view" class="view"></div>
+                    <div id="ai-insights-view" class="view"></div>
 
                     <div id="product-trace-view" class="view"></div>
                     <div id="stock-aging-view" class="view"></div>
@@ -2950,6 +2960,8 @@
                             renderDataManagementView();
                         } else if (currentView === 'calculator') {
                             renderCalculatorView();
+                        } else if (currentView === 'ai-insights') {
+                            if (typeof window.renderAiInsightsView === 'function') window.renderAiInsightsView();
                         } else if (currentView === 'stock-adjustment-requests') {
                             if (typeof window.renderStockAdjustmentRequestsView === 'function') window.renderStockAdjustmentRequestsView();
                             else renderStockAdjustmentRequestsView();
@@ -3675,6 +3687,488 @@
                                 return `${t.date},"${cName}","${iName}",${t.quantity},"${t.batchNo}","${t.invoiceNo}","${t.subtype}"`;
                             }).join("\n");
                         downloadCSV(csv, "sales_report.csv");
+                    };
+
+                    // ============================
+                    // AI INSIGHTS – CONFIG & HELPERS
+                    // ============================
+                    const AI_LOCAL_STORAGE_KEY = 'MIKLENS_AI_CONFIG_V1';
+
+                    function loadAiConfig() {
+                        try {
+                            const raw = localStorage.getItem(AI_LOCAL_STORAGE_KEY);
+                            if (!raw) return getDefaultAiConfig();
+                            const parsed = JSON.parse(raw);
+                            return Object.assign(getDefaultAiConfig(), parsed);
+                        } catch (e) {
+                            console.warn('AI config load failed, using defaults', e);
+                            return getDefaultAiConfig();
+                        }
+                    }
+
+                    function saveAiConfig() {
+                        try {
+                            localStorage.setItem(AI_LOCAL_STORAGE_KEY, JSON.stringify(window._aiConfig));
+                        } catch (e) {
+                            console.warn('AI config save failed', e);
+                        }
+                    }
+
+                    function getDefaultAiConfig() {
+                        return {
+                            providers: {
+                                gemini: {
+                                    models: [
+                                        { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', apiModel: 'gemini-1.5-flash-latest', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-3-flash', name: 'Gemini 3 Flash', apiModel: 'gemini-1.5-flash', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', apiModel: 'gemini-1.5-pro', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', apiModel: 'gemini-2.5-flash', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', apiModel: 'gemini-2.5-pro', enabled: true, keys: [], lastKeyIndex: 0 }
+                                    ],
+                                    modelFallbackOrder: ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.5-pro'],
+                                    preferredModel: 'gemini-3.1-flash-lite'
+                                },
+                                groq: {
+                                    models: [
+                                        { id: 'groq-llama-4-scout', name: 'Groq LLaMA 4 Scout', apiModel: 'llama-4-Scout', enabled: true, keys: [], lastKeyIndex: 0 }
+                                    ],
+                                    modelFallbackOrder: ['groq-llama-4-scout'],
+                                    preferredModel: 'groq-llama-4-scout'
+                                }
+                            },
+                            global: {
+                                defaultProvider: 'gemini',
+                                fallbackProvider: 'groq'
+                            }
+                        };
+                    }
+
+                    window._aiConfig = loadAiConfig();
+
+                    function getNextAiKey(providerId, model, lastTriedIndex) {
+                        const keys = model.keys || [];
+                        if (!keys.length) return null;
+                        const start = (typeof lastTriedIndex === 'number' && lastTriedIndex >= 0) ? (lastTriedIndex + 1) : (model.lastKeyIndex || 0);
+                        for (let i = 0; i < keys.length; i++) {
+                            const idx = (start + i) % keys.length;
+                            const k = keys[idx];
+                            if (!k.disabled && k.value) {
+                                return { index: idx, key: k.value, label: k.label || (providerId.toUpperCase() + ' key #' + (idx + 1)) };
+                            }
+                        }
+                        return null;
+                    }
+
+                    async function callGeminiModel(model, apiKey, promptText) {
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.apiModel || 'gemini-1.5-flash-latest')}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                        const body = {
+                            contents: [{ role: 'user', parts: [{ text: promptText }] }],
+                            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+                        };
+                        const res = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        if (!res.ok) {
+                            const txt = await res.text().catch(() => '');
+                            const err = new Error('Gemini error: ' + res.status);
+                            err.status = res.status;
+                            err.body = txt;
+                            throw err;
+                        }
+                        const json = await res.json();
+                        const text = json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0].text
+                            ? json.candidates[0].content.parts[0].text
+                            : JSON.stringify(json);
+                        return { answer: text };
+                    }
+
+                    async function callGroqModel(model, apiKey, promptText) {
+                        const url = 'https://api.groq.com/openai/v1/chat/completions';
+                        const body = {
+                            model: model.apiModel || 'llama-4-Scout',
+                            messages: [
+                                { role: 'system', content: 'You are an inventory analyst. Answer using only the provided Miklens inventory data summary. Be concise and numeric where possible.' },
+                                { role: 'user', content: promptText }
+                            ],
+                            temperature: 0.3
+                        };
+                        const res = await fetch(url, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`
+                            },
+                            body: JSON.stringify(body)
+                        });
+                        if (!res.ok) {
+                            const txt = await res.text().catch(() => '');
+                            const err = new Error('Groq error: ' + res.status);
+                            err.status = res.status;
+                            err.body = txt;
+                            throw err;
+                        }
+                        const json = await res.json();
+                        const choice = json.choices && json.choices[0];
+                        const text = choice && choice.message && choice.message.content ? choice.message.content : JSON.stringify(json);
+                        return { answer: text };
+                    }
+
+                    async function callAiWithFallback(options) {
+                        const { question, dataSummary, providerHint, modelHint } = options;
+                        const cfg = window._aiConfig || getDefaultAiConfig();
+                        const providersOrder = [];
+                        const primary = providerHint || cfg.global.defaultProvider || 'gemini';
+                        const fallback = cfg.global.fallbackProvider || null;
+                        providersOrder.push(primary);
+                        if (fallback && fallback !== primary) providersOrder.push(fallback);
+
+                        const basePrompt = [
+                            'You are an AI assistant for Miklens Inventory Management.',
+                            'You answer questions ONLY using the provided JSON data summary.',
+                            'If something is not present in the data, say you do not know instead of guessing.',
+                            'Prefer structured numeric answers, bullet points and small tables in markdown.',
+                            '',
+                            'DATA SUMMARY (JSON):',
+                            JSON.stringify(dataSummary).slice(0, 6000),
+                            '',
+                            'QUESTION:',
+                            question
+                        ].join('\n');
+
+                        let lastError = null;
+
+                        for (const providerId of providersOrder) {
+                            const pCfg = cfg.providers[providerId];
+                            if (!pCfg) continue;
+                            const order = pCfg.modelFallbackOrder || [];
+                            const modelIds = modelHint && order.includes(modelHint) ? [modelHint].concat(order.filter(id => id !== modelHint)) : order;
+                            for (const modelId of modelIds) {
+                                const model = (pCfg.models || []).find(m => m.id === modelId && m.enabled !== false);
+                                if (!model) continue;
+                                let tried = -1;
+                                while (true) {
+                                    const next = getNextAiKey(providerId, model, tried);
+                                    if (!next) break;
+                                    tried = next.index;
+                                    try {
+                                        let result;
+                                        if (providerId === 'gemini') result = await callGeminiModel(model, next.key, basePrompt);
+                                        else result = await callGroqModel(model, next.key, basePrompt);
+                                        model.lastKeyIndex = next.index;
+                                        saveAiConfig();
+                                        return {
+                                            provider: providerId,
+                                            modelId: model.id,
+                                            keyLabel: next.label,
+                                            answer: result.answer
+                                        };
+                                    } catch (e) {
+                                        lastError = e;
+                                        const status = e && e.status;
+                                        if (status && [401, 403, 429, 500, 502, 503, 504].indexOf(status) >= 0) {
+                                            continue;
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        throw lastError || new Error('No AI provider or key configured.');
+                    }
+
+                    window.renderAiInsightsView = function () {
+                        const container = document.getElementById('ai-insights-view');
+                        if (!container) return;
+                        container.innerHTML = `
+            <div class="flex flex-col gap-4">
+                <div class="flex items-center justify-between mb-2">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">AI Insights</h2>
+                        <p class="text-xs text-gray-500">Admin / Manager only. Answers are based on current inventory & transactions.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <select id="ai-provider-select" class="border rounded px-2 py-1 text-sm">
+                            <option value="auto">Provider: Auto</option>
+                            <option value="gemini">Provider: Gemini only</option>
+                            <option value="groq">Provider: Groq only</option>
+                        </select>
+                        <button id="ai-settings-btn" class="px-3 py-1 rounded bg-gray-800 text-white text-xs font-semibold">AI Settings</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="lg:col-span-2 flex flex-col bg-white rounded-lg shadow p-4">
+                        <div id="ai-chat-log" class="flex-1 overflow-y-auto mb-3 space-y-3 text-sm text-gray-800" style="max-height: 480px;">
+                            <div class="text-xs text-gray-500">Ask about stock, consumption, dispatch, wastage, customers, etc. Example: <span class="font-mono">"Top 10 items by consumption in last 90 days"</span></div>
+                        </div>
+                        <form id="ai-question-form" class="flex gap-2 mt-1">
+                            <input id="ai-question-input" type="text" class="flex-1 border rounded px-3 py-2 text-sm" placeholder="Ask a question about your inventory data..." />
+                            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-semibold hover:bg-indigo-700">Ask</button>
+                        </form>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-4 text-xs text-gray-700 space-y-3">
+                        <h3 class="text-sm font-bold">Quick questions</h3>
+                        <div class="flex flex-col gap-2">
+                            <button class="ai-quick-btn text-left px-3 py-2 rounded border hover:bg-gray-50" data-q="Show top 10 items by consumption value in the last 90 days.">Top 10 consumed items (90 days)</button>
+                            <button class="ai-quick-btn text-left px-3 py-2 rounded border hover:bg-gray-50" data-q="Which items are below minimum stock level and what are their current stocks and min levels?">Items below min stock</button>
+                            <button class="ai-quick-btn text-left px-3 py-2 rounded border hover:bg-gray-50" data-q="Summarize stock value by category and highlight which category has highest value.">Stock value by category</button>
+                            <button class="ai-quick-btn text-left px-3 py-2 rounded border hover:bg-gray-50" data-q="Show monthly consumption and wastage (process loss, spillage, expired, qc_rejection) for the last 6 months.">Monthly wastage vs consumption</button>
+                            <button class="ai-quick-btn text-left px-3 py-2 rounded border hover:bg-gray-50" data-q="List top 10 customers by dispatch quantity and value in the last 12 months.">Top customers by dispatch</button>
+                        </div>
+                        <div class="pt-3 border-t mt-3">
+                            <p class="font-semibold mb-1">Key status</p>
+                            <p id="ai-key-status" class="text-xs text-gray-500"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- AI Settings Modal -->
+            <div id="ai-settings-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 text-xs">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold text-gray-800">AI Settings (local to this browser)</h3>
+                        <button id="ai-settings-close" class="text-gray-500 hover:text-gray-800 text-lg">&times;</button>
+                    </div>
+                    <div class="space-y-4">
+                        <div class="border rounded-lg p-3">
+                            <h4 class="font-semibold mb-2 text-sm">Global</h4>
+                            <div class="flex flex-wrap gap-4 items-center">
+                                <label class="flex items-center gap-2">
+                                    <span>Default provider:</span>
+                                    <select id="ai-global-default-provider" class="border rounded px-2 py-1 text-xs">
+                                        <option value="gemini">Gemini</option>
+                                        <option value="groq">Groq</option>
+                                    </select>
+                                </label>
+                                <label class="flex items-center gap-2">
+                                    <span>Fallback provider:</span>
+                                    <select id="ai-global-fallback-provider" class="border rounded px-2 py-1 text-xs">
+                                        <option value="">None</option>
+                                        <option value="gemini">Gemini</option>
+                                        <option value="groq">Groq</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="border rounded-lg p-3">
+                            <h4 class="font-semibold mb-2 text-sm">Gemini models & keys</h4>
+                            <div id="ai-gemini-models" class="space-y-3"></div>
+                        </div>
+                        <div class="border rounded-lg p-3">
+                            <h4 class="font-semibold mb-2 text-sm">Groq models & keys</h4>
+                            <div id="ai-groq-models" class="space-y-3"></div>
+                        </div>
+                        <div class="flex justify-end gap-2 pt-2 border-t mt-2">
+                            <button id="ai-settings-clear" class="px-3 py-1 border rounded text-xs">Clear all keys</button>
+                            <button id="ai-settings-save" class="px-4 py-1 bg-indigo-600 text-white rounded text-xs font-semibold">Save locally</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+
+                        // Wire up AI tab behaviour
+                        const chatLog = document.getElementById('ai-chat-log');
+                        const form = document.getElementById('ai-question-form');
+                        const input = document.getElementById('ai-question-input');
+                        const keyStatusEl = document.getElementById('ai-key-status');
+                        const providerSelect = document.getElementById('ai-provider-select');
+                        const quickButtons = container.querySelectorAll('.ai-quick-btn');
+
+                        function updateKeyStatus() {
+                            const cfg = window._aiConfig || getDefaultAiConfig();
+                            const gModels = cfg.providers.gemini.models || [];
+                            const gKeys = gModels.reduce((sum, m) => sum + (m.keys || []).filter(k => k.value && !k.disabled).length, 0);
+                            const qModels = cfg.providers.groq.models || [];
+                            const qKeys = qModels.reduce((sum, m) => sum + (m.keys || []).filter(k => k.value && !k.disabled).length, 0);
+                            keyStatusEl.textContent = `Gemini active keys: ${gKeys} | Groq active keys: ${qKeys}`;
+                        }
+
+                        updateKeyStatus();
+
+                        function appendMessage(role, text) {
+                            const div = document.createElement('div');
+                            div.className = role === 'user' ? 'text-sm text-gray-800' : 'text-sm text-indigo-900 bg-indigo-50 rounded p-2';
+                            div.innerHTML = role === 'user' ? `<span class="font-semibold mr-1">You:</span>${text}` : `<span class="font-semibold block mb-1">AI:</span>${text.replace(/\n/g, '<br>')}`;
+                            chatLog.appendChild(div);
+                            chatLog.scrollTop = chatLog.scrollHeight;
+                        }
+
+                        async function handleAsk(question) {
+                            if (!question || !question.trim()) return;
+                            appendMessage('user', question.trim());
+                            input.value = '';
+                            appendMessage('assistant', '<span class="text-gray-500 text-xs">Thinking...</span>');
+
+                            // Prepare data summary (keep size reasonable)
+                            const snapshot = {
+                                inventory: appState.inventory || {},
+                                transactions: (appState.transactions || []).slice(-500),
+                                suppliers: appState.suppliers || [],
+                                customers: appState.customers || []
+                            };
+
+                            const providerHint = providerSelect.value === 'auto' ? null : providerSelect.value;
+                            try {
+                                const result = await callAiWithFallback({
+                                    question: question.trim(),
+                                    dataSummary: snapshot,
+                                    providerHint: providerHint,
+                                    modelHint: null
+                                });
+                                // Remove last "Thinking..." bubble
+                                chatLog.lastChild && chatLog.removeChild(chatLog.lastChild);
+                                const meta = `<div class="text-[10px] text-gray-400 mb-1">Provider: ${result.provider}, model: ${result.modelId}, key: ${result.keyLabel}</div>`;
+                                appendMessage('assistant', meta + result.answer);
+                                updateKeyStatus();
+                            } catch (e) {
+                                console.error('AI error', e);
+                                chatLog.lastChild && chatLog.removeChild(chatLog.lastChild);
+                                appendMessage('assistant', `<span class="text-red-600 text-xs">AI failed: ${(e && e.message) || 'Unknown error'}. Open AI Settings and check keys/quotas.</span>`);
+                            }
+                        }
+
+                        form.addEventListener('submit', function (ev) {
+                            ev.preventDefault();
+                            handleAsk(input.value);
+                        });
+
+                        quickButtons.forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const q = btn.getAttribute('data-q') || '';
+                                handleAsk(q);
+                            });
+                        });
+
+                        // Settings modal wiring
+                        const modal = document.getElementById('ai-settings-modal');
+                        const openBtn = document.getElementById('ai-settings-btn');
+                        const closeBtn = document.getElementById('ai-settings-close');
+                        const saveBtn = document.getElementById('ai-settings-save');
+                        const clearBtn = document.getElementById('ai-settings-clear');
+                        const defaultProvSel = document.getElementById('ai-global-default-provider');
+                        const fallbackProvSel = document.getElementById('ai-global-fallback-provider');
+                        const geminiModelsDiv = document.getElementById('ai-gemini-models');
+                        const groqModelsDiv = document.getElementById('ai-groq-models');
+
+                        function renderModelsConfig() {
+                            const cfg = window._aiConfig || getDefaultAiConfig();
+                            defaultProvSel.value = cfg.global.defaultProvider || 'gemini';
+                            fallbackProvSel.value = cfg.global.fallbackProvider || '';
+
+                            function renderProviderModels(providerId, container) {
+                                container.innerHTML = '';
+                                const pCfg = cfg.providers[providerId];
+                                if (!pCfg) return;
+                                (pCfg.models || []).forEach((m, mi) => {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.className = 'border rounded p-2';
+                                    const keys = m.keys || [];
+                                    wrapper.innerHTML = `
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="font-semibold text-xs">${m.name || m.id}</div>
+                            <label class="flex items-center gap-1 text-[11px]">
+                                <input type="checkbox" data-provider="${providerId}" data-model-index="${mi}" class="ai-model-enabled" ${m.enabled !== false ? 'checked' : ''}/>
+                                <span>Enabled</span>
+                            </label>
+                        </div>
+                        <div class="space-y-1">
+                            ${(keys.length ? keys : [{ label: '', value: '', disabled: false }]).map((k, ki) => `
+                                <div class="flex flex-wrap gap-1 items-center mb-1">
+                                    <input type="text" placeholder="Label" value="${k.label || ''}" data-provider="${providerId}" data-model-index="${mi}" data-key-index="${ki}" data-field="label" class="ai-key-input border rounded px-1 py-[2px] text-[11px] w-28" />
+                                    <input type="password" placeholder="API key" value="${k.value || ''}" data-provider="${providerId}" data-model-index="${mi}" data-key-index="${ki}" data-field="value" class="ai-key-input border rounded px-1 py-[2px] text-[11px] flex-1 min-w-[120px]" />
+                                    <label class="flex items-center gap-1 text-[10px]">
+                                        <input type="checkbox" data-provider="${providerId}" data-model-index="${mi}" data-key-index="${ki}" class="ai-key-enabled" ${k.disabled ? '' : 'checked'} />
+                                        <span>Enabled</span>
+                                    </label>
+                                </div>
+                            `).join('')}
+                            <button type="button" class="mt-1 px-2 py-[2px] border rounded text-[10px] ai-add-key-btn" data-provider="${providerId}" data-model-index="${mi}">+ Add key</button>
+                        </div>
+                        `;
+                                    container.appendChild(wrapper);
+                                });
+                            }
+
+                            renderProviderModels('gemini', geminiModelsDiv);
+                            renderProviderModels('groq', groqModelsDiv);
+
+                            container.querySelectorAll('.ai-model-enabled').forEach(cb => {
+                                cb.addEventListener('change', () => {
+                                    const prov = cb.getAttribute('data-provider');
+                                    const mi = parseInt(cb.getAttribute('data-model-index'), 10);
+                                    window._aiConfig.providers[prov].models[mi].enabled = cb.checked;
+                                });
+                            });
+                            container.querySelectorAll('.ai-key-input').forEach(inp => {
+                                inp.addEventListener('input', () => {
+                                    const prov = inp.getAttribute('data-provider');
+                                    const mi = parseInt(inp.getAttribute('data-model-index'), 10);
+                                    const ki = parseInt(inp.getAttribute('data-key-index'), 10);
+                                    const field = inp.getAttribute('data-field');
+                                    const model = window._aiConfig.providers[prov].models[mi];
+                                    model.keys = model.keys || [];
+                                    if (!model.keys[ki]) model.keys[ki] = { label: '', value: '', disabled: false };
+                                    model.keys[ki][field] = inp.value;
+                                });
+                            });
+                            container.querySelectorAll('.ai-key-enabled').forEach(cb => {
+                                cb.addEventListener('change', () => {
+                                    const prov = cb.getAttribute('data-provider');
+                                    const mi = parseInt(cb.getAttribute('data-model-index'), 10);
+                                    const ki = parseInt(cb.getAttribute('data-key-index'), 10);
+                                    const model = window._aiConfig.providers[prov].models[mi];
+                                    model.keys = model.keys || [];
+                                    if (!model.keys[ki]) model.keys[ki] = { label: '', value: '', disabled: false };
+                                    model.keys[ki].disabled = !cb.checked;
+                                });
+                            });
+                            container.querySelectorAll('.ai-add-key-btn').forEach(btn => {
+                                btn.addEventListener('click', () => {
+                                    const prov = btn.getAttribute('data-provider');
+                                    const mi = parseInt(btn.getAttribute('data-model-index'), 10);
+                                    const model = window._aiConfig.providers[prov].models[mi];
+                                    model.keys = model.keys || [];
+                                    if (model.keys.length >= 10) { alert('Maximum 10 keys per model.'); return; }
+                                    model.keys.push({ label: '', value: '', disabled: false });
+                                    renderModelsConfig();
+                                });
+                            });
+                        }
+
+                        openBtn.addEventListener('click', () => {
+                            renderModelsConfig();
+                            modal.classList.remove('hidden');
+                            modal.classList.add('flex');
+                        });
+                        closeBtn.addEventListener('click', () => {
+                            modal.classList.add('hidden');
+                            modal.classList.remove('flex');
+                        });
+                        modal.addEventListener('click', (ev) => {
+                            if (ev.target === modal) {
+                                modal.classList.add('hidden');
+                                modal.classList.remove('flex');
+                            }
+                        });
+                        saveBtn.addEventListener('click', () => {
+                            window._aiConfig.global.defaultProvider = defaultProvSel.value || 'gemini';
+                            window._aiConfig.global.fallbackProvider = fallbackProvSel.value || '';
+                            saveAiConfig();
+                            updateKeyStatus();
+                            modal.classList.add('hidden');
+                            modal.classList.remove('flex');
+                        });
+                        clearBtn.addEventListener('click', () => {
+                            if (!confirm('Clear all stored AI keys on this browser?')) return;
+                            window._aiConfig = getDefaultAiConfig();
+                            saveAiConfig();
+                            renderModelsConfig();
+                            updateKeyStatus();
+                        });
                     };
 
                     window.undoLastItemAction = function (category, itemId, type) {
