@@ -160,7 +160,8 @@
     'approval_needed', 'request_approved', 'request_edited', 'request_cancelled', 'request_deleted',
     'request_rejected', 'request_on_hold', 'correction_requested',
     'materials_issued', 'partial_issued', 'reservation_released',
-    'production_completed', 'production_paused', 'production_cancelled'
+    'production_completed', 'production_paused', 'production_cancelled',
+    'dispatch_approval_required', 'dispatch_approved'
   ];
 
   async function buildEmailContent(type, data) {
@@ -212,8 +213,9 @@
       to = managers0.length ? managers0.join(',') : '';
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Reservation Released – Re-issue if needed';
     } else if (type === 'dispatch_approval_required') {
-      eventTitle = 'Dispatch Approval Required';
-      title = 'Dispatch Request';
+      var isDirect = payload.directFromStock === true;
+      eventTitle = isDirect ? 'Direct Dispatch from Stock – Approval Required' : 'Dispatch Approval Required';
+      title = isDirect ? 'Direct Dispatch Request' : 'Dispatch Request';
       color = STATUS_COLORS.INFO;
       details = [
         { label: 'Request ID', value: payload.requestId || '' },
@@ -221,11 +223,12 @@
         { label: 'Product', value: payload.productName || '' },
         { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
         { label: 'Requested by', value: payload.requestedBy || '' },
+        { label: 'Type', value: isDirect ? 'Direct from stock (no production)' : 'Produced batch' },
         { label: 'Action', value: 'Approve or reject in the app.' }
       ];
       var managers1 = await getManagerAdminEmails();
       to = managers1.length ? managers1.join(',') : '';
-      subject = '[MIKLENS] Dispatch Approval Required – ' + (payload.productName || '');
+      subject = '[MIKLENS] ' + (isDirect ? 'Direct Dispatch' : 'Dispatch') + ' Approval Required – ' + (payload.productName || '');
     } else if (type === 'dispatch_approved') {
       eventTitle = 'Dispatch Approved';
       title = 'Dispatch Approved';
@@ -940,6 +943,141 @@
     return { result: 'success' };
   }
 
+  /** Get finished goods and customers from Main Inventory for standalone dispatch (no requisition). */
+  async function getInventoryForStandaloneDispatch(params) {
+    var latestRef = db.collection('Database').doc('latest');
+    var snap = await latestRef.get();
+    if (!snap.exists) return ok({ finishedGoods: [], customers: [], version: null });
+    var d = snap.data();
+    var payload = (d && d.data) ? d.data : d;
+    var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    var arr = (inv && (inv.finishedGoods || inv.products || [])) || [];
+    if (!Array.isArray(arr)) arr = [];
+    var customers = (payload && payload.customers) ? payload.customers : [];
+    if (!Array.isArray(customers)) customers = [];
+    var version = (d && d.latestId) ? d.latestId : null;
+    return ok({
+      finishedGoods: arr.map(function (i) {
+        return { id: i.id || i.name, name: i.name || i.itemName || String(i.id || ''), unit: i.unit || 'Units', quantity: parseFloat(i.quantity || i.qty || 0) || 0 };
+      }),
+      customers: customers.map(function (c) { return { id: c.id, name: c.name || '', type: c.type || '', location: c.location || '', gst: c.gst || '' }; }),
+      version: version
+    });
+  }
+
+  /** Standalone dispatch from stock – no requisition. Deducts FG, adds transaction, updates Main Inventory. Can add new customer. */
+  async function standaloneDispatchFromStock(params) {
+    var productId = params.productId;
+    var productName = (params.productName || '').toString().trim();
+    var qty = parseFloat(params.quantity || 0);
+    var unit = (params.unit || '').toString().trim();
+    var customerId = params.customerId != null ? (typeof params.customerId === 'number' ? params.customerId : parseFloat(params.customerId)) : null;
+    var newCustomerName = (params.newCustomerName || '').toString().trim();
+    var user = params.user || 'User';
+    var remarks = (params.remarks || '').toString().trim();
+    if (!productName && productId == null) return fail(new Error('Product name or ID required'));
+    if (qty <= 0) return fail(new Error('Quantity must be positive'));
+    if (customerId == null && !newCustomerName) return fail(new Error('Select a customer or enter new customer name'));
+
+    var latestRef = db.collection('Database').doc('latest');
+    var snap = await latestRef.get();
+    if (!snap.exists) return fail(new Error('No inventory data. Add stock in Main Inventory first.'));
+    var d = snap.data();
+    var currentVersion = (d.latestId || '').toString();
+    var payload = (d && d.data) ? d.data : d;
+    if (!payload || typeof payload !== 'object') return fail(new Error('Invalid inventory structure'));
+
+    var inv = (payload.inventory || payload);
+    var arr = (inv.finishedGoods || inv.products || []);
+    if (!Array.isArray(arr)) return fail(new Error('Finished goods list not found'));
+
+    var customers = payload.customers || [];
+    if (!Array.isArray(customers)) customers = [];
+
+    var nameStr = productName || '';
+    var itemId = productId;
+    var itemName = '';
+    var itemUnit = unit;
+    for (var i = 0; i < arr.length; i++) {
+      var it = arr[i];
+      var match = nameStr && (String(it.name || '') === nameStr || String(it.itemName || '') === nameStr || String(it.id || '') === nameStr);
+      if (!match && itemId != null) match = (it.id == itemId || it.id === itemId);
+      if (match) {
+        itemId = it.id;
+        itemName = (it.name || it.itemName || String(it.id || '')).toString().trim();
+        itemUnit = (it.unit || 'Units').toString().trim();
+        break;
+      }
+    }
+    if (!itemName && nameStr) {
+      for (var j = 0; j < arr.length; j++) {
+        if (String(arr[j].name || arr[j].itemName || arr[j].id || '').toLowerCase().indexOf(nameStr.toLowerCase()) >= 0) {
+          itemId = arr[j].id;
+          itemName = (arr[j].name || arr[j].itemName || String(arr[j].id || '')).toString().trim();
+          itemUnit = (arr[j].unit || 'Units').toString().trim();
+          break;
+        }
+      }
+    }
+    if (!itemName) itemName = nameStr || productId;
+
+    var remaining = qty;
+    for (var k = 0; k < arr.length && remaining > 0; k++) {
+      var item = arr[k];
+      var m = (String(item.name || '') === itemName || String(item.itemName || '') === itemName || String(item.id || '') === itemName || (itemId != null && (item.id == itemId || item.id === itemId)));
+      if (!m) continue;
+      var current = parseFloat(item.quantity || item.qty || 0) || 0;
+      var deduct = Math.min(remaining, current);
+      item.quantity = item.qty = Math.max(0, current - deduct);
+      remaining -= deduct;
+    }
+    if (remaining > 0) return fail(new Error('Insufficient stock for ' + itemName + '. Shortfall: ' + remaining + ' ' + itemUnit));
+
+    var custId = customerId;
+    var custName = '';
+    if (custId != null) {
+      var cust = customers.find(function (c) { return c.id == custId || c.id === custId; });
+      custName = cust ? (cust.name || '').toString().trim() : '';
+    }
+    if (newCustomerName && !custName) {
+      custId = Date.now();
+      custName = newCustomerName;
+      customers.push({ id: custId, name: custName, type: 'Standard', location: '', gst: '' });
+    }
+    if (!custName) return fail(new Error('Customer not found'));
+
+    var nowIso = new Date().toISOString();
+    var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
+    if (!Array.isArray(payload.transactions)) payload.transactions = [];
+    payload.transactions.push({
+      id: Date.now(),
+      itemId: itemId,
+      itemName: itemName,
+      category: 'finishedGoods',
+      type: 'dispatch',
+      subtype: 'Sale',
+      quantity: -qty,
+      date: dateStr,
+      customerId: custId,
+      customerName: custName,
+      notes: remarks || 'Standalone dispatch from Digital Requisition',
+      source: 'digital_requisition',
+      dispatchedBy: user
+    });
+
+    payload.customers = customers;
+
+    var saveResult = await saveInventory(payload, currentVersion);
+    if (saveResult.result === 'error' && saveResult.code === 'CONFLICT') {
+      return fail(new Error('Inventory was changed by someone else. Sync Main Inventory, then try again.'));
+    }
+    if (saveResult.result !== 'success' && saveResult.status !== 'success') {
+      return fail(new Error(saveResult.error || 'Dispatch failed'));
+    }
+    await auditLog('standalone_dispatch', user, { productName: itemName, quantity: qty, customerName: custName });
+    return ok({ message: 'Dispatch recorded. Main Inventory updated.', customerName: custName });
+  }
+
   /** Release reservations older than X hours (optional auto-release). Resets requisition to Awaiting Material Issue so Store can re-issue. */
   async function releaseExpiredReservations(params) {
     var hours = parseFloat(params.hours || params.hoursLimit || 48, 10) || 48;
@@ -1003,6 +1141,7 @@
     var page = parseInt(params.page, 10) || 1;
     var skip = (page - 1) * limit;
     var light = params.light === '1' || params.light === true;
+    var requesterEmail = (params.requesterEmail || params.email || '').toLowerCase().trim();
     var all = await getCollectionArray('Requisitions_V2');
     var match = function (r, st) {
       var status = (r.Status || r.status || '').toUpperCase();
@@ -1026,6 +1165,18 @@
       return false;
     };
     var filtered = stage === 'ALL' ? all : all.filter(function (r) { return match(r, stage); });
+    if (requesterEmail) {
+      filtered = filtered.filter(function (r) {
+        var re = (r.EmployeeEm || r.requesterEmail || '').toLowerCase().trim();
+        return re === requesterEmail;
+      });
+    }
+    if (params.directDispatchOnly === '1' || params.directDispatchOnly === true) {
+      filtered = filtered.filter(function (r) {
+        var s = (r.Status || r.status || '').toUpperCase();
+        return s === 'APPROVED' || s === 'APPROVE_REQUEST';
+      });
+    }
     var totalMatches = filtered.length;
     var pageList = filtered.slice(skip, skip + limit);
     var requests = pageList.map(function (d) { return rowToRequest(d, light); });
@@ -1835,8 +1986,10 @@
     if (!reqSnap.exists) return fail(new Error('Request not found'));
     var reqData = reqSnap.data();
     var status = (reqData.Status || '').toUpperCase();
-    if (status !== 'PRODUCED') return fail(new Error('Only produced batches can be dispatched'));
+    var allowedStatuses = ['PRODUCED', 'APPROVED', 'APPROVE_REQUEST'];
+    if (allowedStatuses.indexOf(status) < 0) return fail(new Error('Dispatch allowed only for produced batches or approved requests (direct from stock)'));
     var dispatchId = 'DSP-' + Date.now();
+    var isDirectFromStock = (status === 'APPROVED' || status === 'APPROVE_REQUEST');
     await db.collection('RequisitionDispatches').doc(dispatchId).set({
       DispatchID: dispatchId,
       RequestID: requestId,
@@ -1850,15 +2003,19 @@
       ApprovedBy: '',
       ApprovedAt: null,
       MainInvSynced: 'N',
-      Remarks: remarks
+      Remarks: remarks,
+      DirectFromStock: isDirectFromStock
     });
+    var requesterEm = (reqData.EmployeeEm || reqData.requesterEmail || '').trim();
     await pushNotificationQueue('dispatch_approval_required', {
       dispatchId: dispatchId,
       requestId: requestId,
       productName: productName,
       quantity: qty,
       unit: unit || reqData.Unit || '',
-      requestedBy: requestedBy
+      requestedBy: requestedBy,
+      requesterEmail: requesterEm,
+      directFromStock: isDirectFromStock
     });
     return ok({ dispatchId: dispatchId, message: 'Dispatch request submitted for manager approval' });
   }
@@ -2329,6 +2486,8 @@
     },
     request_dispatch: requestDispatch,
     approve_dispatch: approveDispatch,
+    get_inventory_for_standalone_dispatch: getInventoryForStandaloneDispatch,
+    standalone_dispatch_from_stock: standaloneDispatchFromStock,
     confirm_formula: confirmFormula,
     request_correction: requestCorrection,
     update_request_packing_labels: updateRequestPackingLabels,
