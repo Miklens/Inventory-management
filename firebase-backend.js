@@ -377,6 +377,66 @@
       to = (payload.requesterEmail || '').trim();
       if (!to) { var managersPart = await getManagerAdminEmails(); to = managersPart.length ? managersPart.join(',') : ''; }
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Partially Issued – ' + (payload.productName || '');
+    } else if (type === 'request_edited') {
+      eventTitle = 'Request Edited';
+      title = 'Requisition Modified';
+      color = STATUS_COLORS.INFO;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Type', value: reqType || '—' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Edited by', value: payload.editedBy || '' },
+        { label: 'Changes', value: payload.changes || '—' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || '') },
+        { label: 'Requester', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
+        { label: 'Action', value: 'Review the changes in the app.' }
+      ];
+      var managersEdit = await getManagerAdminEmails();
+      var editRecipients = [];
+      managersEdit.forEach(function (e) { editRecipients.push(e); });
+      var reqEmail = (payload.requesterEmail || '').trim();
+      if (reqEmail && editRecipients.indexOf(reqEmail) < 0) editRecipients.push(reqEmail);
+      to = editRecipients.join(',');
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Request Edited by ' + (payload.editedBy || 'User');
+    } else if (type === 'request_deleted') {
+      eventTitle = 'Request Deleted';
+      title = 'Requisition Permanently Removed';
+      color = STATUS_COLORS.ERROR;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Type', value: reqType || '—' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Requester', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
+        { label: 'Deleted by', value: payload.deletedBy || '' },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Action', value: 'This request has been permanently removed. No further action required.' }
+      ];
+      var managersDel = await getManagerAdminEmails();
+      var delRecipients = [];
+      managersDel.forEach(function (e) { delRecipients.push(e); });
+      var delReqEmail = (payload.requesterEmail || '').trim();
+      if (delReqEmail && delRecipients.indexOf(delReqEmail) < 0) delRecipients.push(delReqEmail);
+      to = delRecipients.join(',');
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Request Deleted by ' + (payload.deletedBy || 'Admin');
+    } else if (type === 'request_cancelled') {
+      eventTitle = 'Request Cancelled';
+      title = 'Requisition Cancelled';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Type', value: reqType || '—' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Cancelled by', value: payload.cancelledBy || '' },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Action', value: 'This request has been cancelled.' }
+      ];
+      var managersCanc = await getManagerAdminEmails();
+      var cancRecipients = [];
+      managersCanc.forEach(function (e) { cancRecipients.push(e); });
+      var cancReqEmail = (payload.requesterEmail || '').trim();
+      if (cancReqEmail && cancRecipients.indexOf(cancReqEmail) < 0) cancRecipients.push(cancReqEmail);
+      to = cancRecipients.join(',');
+      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Request Cancelled';
     } else {
       eventTitle = type.replace(/_/g, ' ');
       details = [{ label: 'Type', value: type }, { label: 'Data', value: JSON.stringify(payload) }];
@@ -403,6 +463,12 @@
       isManagerEmail = true;
       actions.push({ label: 'Review & Approve', color: '#10b981', query: '' });
       actions.push({ label: 'Delete Request', color: '#ef4444', query: '' });
+    } else if (type === 'request_edited') {
+      actions.push({ label: 'View Changes', color: '#3b82f6', query: '' });
+    } else if (type === 'request_deleted') {
+      actions.push({ label: 'View App', color: '#6b7280', query: '' });
+    } else if (type === 'request_cancelled') {
+      actions.push({ label: 'View App', color: '#6b7280', query: '' });
     }
 
     var html = buildHtml(reqId, eventTitle, title, details, color, backendConfig.APP_URL, {
@@ -1902,6 +1968,20 @@
       return fail(new Error('Invalid wipAction: use PAUSE, COMPLETE, or CANCEL'));
     }
     await ref.update(updates);
+
+    var actionLabel = action === 'PAUSE' ? 'PRODUCTION PAUSED' : action === 'COMPLETE' ? 'PRODUCTION COMPLETED' : 'REQUEST CANCELLED';
+    var remarkText = action === 'CANCEL' ? 'Cancelled by ' + (params.user || userEmail) + (reason ? '. Reason: ' + reason : '') :
+                     action === 'PAUSE' ? 'Paused by ' + (params.user || userEmail) + (reason ? '. Reason: ' + reason : '') :
+                     'Completed by ' + (params.user || userEmail);
+    await db.collection('RequestThreads').add({
+      RequestID: id,
+      Timestamp: new Date().toISOString(),
+      Actor: 'System',
+      Action: actionLabel,
+      User: params.user || userEmail,
+      Remarks: remarkText
+    });
+
     var batchId = reqData.BatchID;
     if (batchId) {
       var wipRef = db.collection('WIP_Batches').doc(String(batchId).replace(/\//g, '_'));
@@ -1973,15 +2053,47 @@
     var id = params.id;
     if (!id) return fail(new Error('No request id'));
     var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
+    var actorName = params.user || actorId;
     var allowed = await hasRole(actorId, ['Manager', 'Admin']);
     if (!allowed) return fail(new Error('Only Manager or Admin can delete requests'));
     var ref = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
     var snap = await ref.get();
     if (!snap.exists) return fail(new Error('Request not found'));
+    var data = snap.data();
+    var reason = (params.reason || '').trim() || 'No reason provided';
+
+    await db.collection('RequestThreads').add({
+      RequestID: id,
+      Timestamp: new Date().toISOString(),
+      Actor: 'Manager/Admin',
+      Action: 'REQUEST DELETED',
+      User: actorName,
+      Remarks: 'Request permanently deleted by ' + actorName + '. Reason: ' + reason
+    });
+
+    try {
+      var requesterEmail = (data.EmployeeEm || data.requesterEmail || '').trim();
+      var managerEmails = await getManagerAdminEmails();
+      var allRecipients = [];
+      if (requesterEmail) allRecipients.push(requesterEmail);
+      managerEmails.forEach(function (e) { if (allRecipients.indexOf(e) < 0) allRecipients.push(e); });
+      if (allRecipients.length > 0) {
+        await pushNotificationQueue('request_deleted', {
+          requestId: id,
+          requestType: data.Type || data.type || '',
+          productName: data.ProductName || data.productName || '',
+          requesterEmail: requesterEmail,
+          requesterName: data.EmployeeName || data.requesterName || '',
+          deletedBy: actorName,
+          reason: reason
+        });
+      }
+    } catch (e) { console.warn('delete notification failed', e); }
+
     await ref.delete();
     var resRef = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
     try { var resSnap = await resRef.get(); if (resSnap.exists) await resRef.delete(); } catch (e) {}
-    await auditLog('requisition_delete', actorId, { requestId: id, reason: params.reason || '' });
+    await auditLog('requisition_delete', actorId, { requestId: id, reason: reason });
     return ok({ message: 'Request deleted permanently' });
   }
 
@@ -1989,6 +2101,7 @@
     var id = params.id;
     if (!id) return fail(new Error('No request id'));
     var email = (params.email || '').toLowerCase().trim();
+    var userName = params.user || email;
     if (!email) return fail(new Error('No email'));
     var ref = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
     var snap = await ref.get();
@@ -2003,15 +2116,64 @@
     var editableStatuses = ['SUBMITTED', 'PENDING', 'CORRECTION_REQUIRED', 'ON_HOLD'];
     if (!editableStatuses.includes(status) && !isAdmin) return fail(new Error('Request can only be edited while Pending or On Hold (current: ' + status + ')'));
     var updates = {};
-    if (params.quantity != null && params.quantity !== '') updates.RequestedQty = Number(params.quantity) || 0;
-    if (params.unit != null) updates.Unit = String(params.unit).trim();
-    if (params.notes != null) updates.Notes = String(params.notes).trim();
-    if (params.productName != null && String(params.productName).trim()) updates.ProductName = String(params.productName).trim();
-    if (params.managerEmail != null) updates.ManagerEmail = String(params.managerEmail).toLowerCase().trim();
-    if (Object.keys(updates).length === 0) return fail(new Error('Nothing to update'));
+    var changeLines = [];
+    if (params.quantity != null && params.quantity !== '') {
+      var newQty = Number(params.quantity) || 0;
+      var oldQty = data.RequestedQty != null ? data.RequestedQty : data.quantity;
+      if (String(newQty) !== String(oldQty)) { updates.RequestedQty = newQty; changeLines.push('Quantity: ' + oldQty + ' → ' + newQty); }
+    }
+    if (params.unit != null) {
+      var newUnit = String(params.unit).trim();
+      if (newUnit !== (data.Unit || '')) { updates.Unit = newUnit; changeLines.push('Unit: ' + (data.Unit || '—') + ' → ' + newUnit); }
+    }
+    if (params.notes != null) {
+      var newNotes = String(params.notes).trim();
+      if (newNotes !== (data.Notes || '')) { updates.Notes = newNotes; changeLines.push('Notes updated'); }
+    }
+    if (params.productName != null && String(params.productName).trim()) {
+      var newProduct = String(params.productName).trim();
+      if (newProduct !== (data.ProductName || '')) { updates.ProductName = newProduct; changeLines.push('Product: ' + (data.ProductName || '—') + ' → ' + newProduct); }
+    }
+    if (params.managerEmail != null) {
+      var newMgr = String(params.managerEmail).toLowerCase().trim();
+      if (newMgr !== (data.ManagerEmail || '')) { updates.ManagerEmail = newMgr; changeLines.push('Manager email updated'); }
+    }
+    if (Object.keys(updates).length === 0) return fail(new Error('Nothing changed'));
     updates.UpdatedAt = new Date().toISOString();
     await ref.update(updates);
-    await auditLog('requisition_edit', email, { requestId: id, fields: Object.keys(updates).join(', ') });
+
+    var changeSummary = changeLines.join('; ');
+    await db.collection('RequestThreads').add({
+      RequestID: id,
+      Timestamp: new Date().toISOString(),
+      Actor: isAdmin ? 'Manager/Admin' : 'Employee',
+      Action: 'REQUEST EDITED',
+      User: userName,
+      Remarks: 'Edited by ' + userName + ': ' + changeSummary
+    });
+
+    try {
+      var requesterEmail = (data.EmployeeEm || data.requesterEmail || '').trim();
+      var managerEmails = await getManagerAdminEmails();
+      var notifyTo = [];
+      managerEmails.forEach(function (e) { notifyTo.push(e); });
+      if (requesterEmail && notifyTo.indexOf(requesterEmail) < 0) notifyTo.push(requesterEmail);
+      if (notifyTo.length > 0) {
+        await pushNotificationQueue('request_edited', {
+          requestId: id,
+          requestType: data.Type || data.type || '',
+          productName: updates.ProductName || data.ProductName || data.productName || '',
+          requesterEmail: requesterEmail,
+          requesterName: data.EmployeeName || data.requesterName || '',
+          editedBy: userName,
+          changes: changeSummary,
+          quantity: updates.RequestedQty != null ? updates.RequestedQty : (data.RequestedQty || ''),
+          unit: updates.Unit || data.Unit || ''
+        });
+      }
+    } catch (e) { console.warn('edit notification failed', e); }
+
+    await auditLog('requisition_edit', email, { requestId: id, changes: changeSummary });
     return ok({ message: 'Request updated' });
   }
 
