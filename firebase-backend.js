@@ -161,7 +161,7 @@
     'request_rejected', 'request_on_hold', 'correction_requested',
     'materials_issued', 'partial_issued', 'reservation_released',
     'production_completed', 'production_paused', 'production_cancelled',
-    'dispatch_approval_required', 'dispatch_approved'
+    'dispatch_approval_required', 'dispatch_approved', 'standalone_dispatch_completed'
   ];
 
   async function buildEmailContent(type, data) {
@@ -242,6 +242,21 @@
       ];
       to = (payload.requesterEmail || '').trim();
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Dispatch Approved';
+    } else if (type === 'standalone_dispatch_completed') {
+      eventTitle = 'Dispatch from Stock Completed';
+      title = 'Standalone Dispatch Recorded';
+      color = STATUS_COLORS.SUCCESS;
+      details = [
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Quantity', value: (payload.quantity != null ? payload.quantity : '') + ' ' + (payload.unit || 'Units') },
+        { label: 'Customer', value: payload.customerName || '' },
+        { label: 'Dispatched by', value: payload.dispatchedBy || payload.user || 'User' },
+        { label: 'Remarks', value: payload.remarks || '—' },
+        { label: 'Action', value: 'Main Inventory updated. Dispatch logged.' }
+      ];
+      var managersStandalone = await getManagerAdminEmails();
+      to = managersStandalone.length ? managersStandalone.join(',') : '';
+      subject = '[MIKLENS] Dispatch from Stock – ' + (payload.productName || '') + ' to ' + (payload.customerName || '');
     } else if (type === 'formula_request_submitted') {
       eventTitle = 'New Formula Request';
       title = 'Formula Request';
@@ -1106,6 +1121,16 @@
       return fail(new Error(saveResult.error || 'Dispatch failed'));
     }
     await auditLog('standalone_dispatch', user, { productName: itemName, quantity: qty, customerName: custName });
+    try {
+      await pushNotificationQueue('standalone_dispatch_completed', {
+        productName: itemName,
+        quantity: qty,
+        unit: itemUnit,
+        customerName: custName,
+        dispatchedBy: user,
+        remarks: remarks
+      });
+    } catch (e) { console.warn('standalone_dispatch_completed email failed:', e); }
     return ok({ message: 'Dispatch recorded. Main Inventory updated.', customerName: custName });
   }
 
