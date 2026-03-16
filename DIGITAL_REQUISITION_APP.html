@@ -3070,12 +3070,13 @@
             const cancelableStatuses = ['SUBMITTED', 'PENDING', 'APPROVED', 'APPROVE_REQUEST', 'CORRECTION_REQUIRED', 'ON_HOLD'];
             const finalStatuses = ['COMPLETED', 'CANCELLED', 'DISPATCHED', 'REJECTED'];
 
-            if (isRequesterFinal && !finalStatuses.includes(req.status)) {
+            const canEditCancel = isRequesterFinal || userRole === 'Manager' || userRole === 'Admin';
+            if (canEditCancel && !finalStatuses.includes(req.status)) {
                 actionBtns += '<div class="w-full border-t border-gray-100 mt-3 pt-3 grid grid-cols-2 gap-2">';
-                if (editableStatuses.includes(req.status)) {
+                if (editableStatuses.includes(req.status) || userRole === 'Manager' || userRole === 'Admin') {
                     actionBtns += `<button onclick="openEditRequestModal('${req.id}')" class="bg-blue-50 text-blue-600 font-black py-2.5 rounded-xl uppercase text-[10px] hover:bg-blue-100 transition-all border border-blue-100">✏️ Edit Request</button>`;
                 }
-                if (cancelableStatuses.includes(req.status)) {
+                if (cancelableStatuses.includes(req.status) || userRole === 'Manager' || userRole === 'Admin') {
                     actionBtns += `<button onclick="cancelRequest(event, '${req.id}')" class="bg-red-50 text-red-500 font-black py-2.5 rounded-xl uppercase text-[10px] hover:bg-red-100 transition-all border border-red-100">🛑 Cancel Request</button>`;
                 }
                 actionBtns += '</div>';
