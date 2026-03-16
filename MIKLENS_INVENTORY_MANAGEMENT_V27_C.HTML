@@ -6105,23 +6105,29 @@
 
                             // Add "Quick Sell" button for Finished Goods
                             if (category === 'finishedGoods') {
-                                // Check if button already exists to avoid dupes
-                                if (!document.getElementById('fg-quick-sell-btn')) {
-                                    const btn = document.createElement('button');
-                                    btn.id = 'fg-quick-sell-btn';
-                                    btn.className = 'mt-4 w-full bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700';
-                                    btn.textContent = 'Go to New Sale / Dispatch';
-                                    btn.onclick = (e) => {
-                                        e.preventDefault();
-                                        closeModal('stockTxModal');
-                                        (window.openDispatchModal || openDispatchModal)(item.id);
-                                    };
-                                    const container = document.getElementById('erp-consume-fields');
-                                    if (container) {
-                                        // Check if button already exists to avoid dupes (though logic above tries)
-                                        if (!document.getElementById('fg-quick-sell-btn')) container.appendChild(btn);
-                                    }
-                                }
+                                const oldBtn = document.getElementById('fg-quick-sell-btn');
+                                if (oldBtn) oldBtn.remove();
+                                const btn = document.createElement('button');
+                                btn.type = 'button';
+                                btn.id = 'fg-quick-sell-btn';
+                                btn.className = 'mt-4 w-full bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700';
+                                btn.textContent = 'Go to New Sale / Dispatch';
+                                btn.dataset.itemId = String(item.id);
+                                btn.onclick = function () {
+                                    const id = this.dataset.itemId;
+                                    (window.closeModal || closeModal)('stockTxModal');
+                                    // Ensure sales-dispatch view loads (sets full openDispatchModal), then open modal
+                                    if (typeof showView === 'function') showView('sales-dispatch');
+                                    setTimeout(function () {
+                                        if (typeof window.openDispatchModal === 'function') {
+                                            window.openDispatchModal(id);
+                                        } else if (typeof openDispatchModal === 'function') {
+                                            openDispatchModal(id);
+                                        }
+                                    }, 350);
+                                };
+                                const container = document.getElementById('erp-consume-fields');
+                                if (container) container.appendChild(btn);
                             }
                         } else {
                             calculator.classList.add('hidden');
@@ -9282,7 +9288,7 @@
                         }
                     };
 
-                    window.openDispatchModal = window.openDispatchModal || openDispatchModal;
+                    window.openDispatchModal = openDispatchModal; // Always use full impl when sales-dispatch has run
                     window.showBatchDetails = showBatchDetails;
                     window.openModal = openModal;
                     window.closeModal = closeModal;
@@ -10823,38 +10829,41 @@
                         }, 500);
                     };
 
-                    window.openDispatchModal = function (itemId) {
-                        const modal = document.getElementById('dispatchModal');
-                        if (!modal) {
-                            if (typeof showView === 'function') showView('sales-dispatch');
-                            return;
-                        }
-                        const itemSelect = document.getElementById('dispatch-item');
-                        const custSelect = document.getElementById('dispatch-customer');
-                        if (!itemSelect || !custSelect) return;
-                        itemSelect.innerHTML = '<option value="">Select Finished Good</option>';
-                        (appState.inventory.finishedGoods || []).forEach(fg => {
-                            const opt = document.createElement('option');
-                            opt.value = fg.id;
-                            opt.textContent = fg.name;
-                            itemSelect.appendChild(opt);
-                        });
-                        custSelect.innerHTML = '<option value="">Select Customer</option>';
-                        (appState.customers || []).forEach(c => {
-                            const opt = document.createElement('option');
-                            opt.value = c.id;
-                            opt.textContent = c.name;
-                            custSelect.appendChild(opt);
-                        });
-                        const dateEl = document.getElementById('dispatch-date');
-                        if (dateEl) dateEl.value = typeof getToday === 'function' ? getToday() : new Date().toISOString().slice(0, 10);
-                        const opt = Array.from(itemSelect.options).find(o => o.value == itemId || String(o.value) === String(itemId));
-                        if (opt) itemSelect.value = opt.value;
-                        else if (itemId) itemSelect.value = itemId;
-                        if (typeof populateDispatchBatchSelect === 'function') populateDispatchBatchSelect();
-                        else if (typeof window.populateDispatchBatchSelect === 'function') window.populateDispatchBatchSelect();
-                        (window.openModal || openModal)('dispatchModal');
-                    };
+                    if (!window.openDispatchModal) {
+                        window.openDispatchModal = function (itemId) {
+                            const modal = document.getElementById('dispatchModal');
+                            if (!modal) {
+                                if (typeof showView === 'function') showView('sales-dispatch');
+                                setTimeout(function () { window.openDispatchModal && window.openDispatchModal(itemId); }, 300);
+                                return;
+                            }
+                            const itemSelect = document.getElementById('dispatch-item');
+                            const custSelect = document.getElementById('dispatch-customer');
+                            if (!itemSelect || !custSelect) return;
+                            itemSelect.innerHTML = '<option value="">Select Finished Good</option>';
+                            (appState.inventory.finishedGoods || []).forEach(fg => {
+                                const opt = document.createElement('option');
+                                opt.value = fg.id;
+                                opt.textContent = fg.name;
+                                itemSelect.appendChild(opt);
+                            });
+                            custSelect.innerHTML = '<option value="">Select Customer</option>';
+                            (appState.customers || []).forEach(c => {
+                                const opt = document.createElement('option');
+                                opt.value = c.id;
+                                opt.textContent = c.name;
+                                custSelect.appendChild(opt);
+                            });
+                            const dateEl = document.getElementById('dispatch-date');
+                            if (dateEl) dateEl.value = typeof getToday === 'function' ? getToday() : new Date().toISOString().slice(0, 10);
+                            const found = Array.from(itemSelect.options).find(o => o.value == itemId || String(o.value) === String(itemId));
+                            if (found) itemSelect.value = found.value;
+                            else if (itemId) itemSelect.value = itemId;
+                            if (typeof populateDispatchBatchSelect === 'function') populateDispatchBatchSelect();
+                            else if (typeof window.populateDispatchBatchSelect === 'function') window.populateDispatchBatchSelect();
+                            (window.openModal || openModal)('dispatchModal');
+                        };
+                    }
 
                     // --- UPDATED INVENTORY TABLE RENDER (FIXED) ---
                     window.renderInventoryView = function (category) {
