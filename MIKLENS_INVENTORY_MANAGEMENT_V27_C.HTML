@@ -3760,7 +3760,10 @@
                     }
 
                     async function callGeminiModel(model, apiKey, promptText) {
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.apiModel || 'gemini-1.5-flash-latest')}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                        // Use the same style as Herbicide app: v1/models/{model}:generateContent
+                        // Model IDs should be the official Gemini IDs (e.g. gemini-3.1-flash-lite-preview).
+                        const modelId = model.apiModel || 'gemini-3.1-flash-lite-preview';
+                        const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
                         const body = {
                             contents: [{ role: 'user', parts: [{ text: promptText }] }],
                             generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
