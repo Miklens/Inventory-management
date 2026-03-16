@@ -53,13 +53,28 @@
     }
   }
 
-  var STATUS_COLORS = { INFO: '#3b82f6', SUCCESS: '#10b981', ALERT: '#ef4444', WARNING: '#f59e0b' };
+  var STATUS_COLORS = { INFO: '#3b82f6', SUCCESS: '#10b981', ALERT: '#ef4444', WARNING: '#f59e0b', ERROR: '#ef4444', RESEARCH: '#8b5cf6', PRODUCTION: '#0891b2' };
 
-  function buildHtml(reqId, eventTitle, title, details, color, appUrl) {
+  function buildHtml(reqId, eventTitle, title, details, color, appUrl, opts) {
+    var o = opts || {};
     var finalUrl = (appUrl || backendConfig.APP_URL || 'https://miklens.github.io/Inventory-management').trim();
+    var requestType = (o.requestType || '').toString().trim();
+    var isResearch = requestType.toLowerCase() === 'research';
+    var isProduction = requestType.toLowerCase() === 'production';
+    var actions = o.actions || [];
+    var cellWrap = 'word-wrap: break-word; word-break: break-word; overflow-wrap: break-word; white-space: normal;';
+
+    var typeBadgeHtml = '';
+    if (requestType) {
+      var badgeBg = isResearch ? '#8b5cf6' : isProduction ? '#0891b2' : '#6b7280';
+      var badgeIcon = isResearch ? '&#128300;' : isProduction ? '&#9881;' : '&#128196;';
+      typeBadgeHtml = '<div style="margin-top: 12px;">' +
+        '<span style="display: inline-block; background-color: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.6); border-radius: 20px; padding: 6px 18px; font-size: 13px; font-weight: bold; color: #ffffff; letter-spacing: 1px; text-transform: uppercase;">' +
+        badgeIcon + '&nbsp; ' + requestType.toUpperCase() + ' REQUEST</span></div>';
+    }
+
     var detailsHtml = '';
     if (details && details.length > 0) {
-      var cellWrap = 'word-wrap: break-word; word-break: break-word; overflow-wrap: break-word; white-space: normal;';
       detailsHtml = '<div style="margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;">' +
         '<table style="width: 100%; min-width: 0; border-collapse: collapse; font-family: sans-serif; font-size: 13px; table-layout: fixed;">' +
         '<thead style="background-color: #f9fafb;"><tr>' +
@@ -74,21 +89,44 @@
       }
       detailsHtml += '</tbody></table></div>';
     }
+
+    var actionButtonsHtml = '';
+    if (actions.length > 0) {
+      actionButtonsHtml = '<div style="text-align: center; margin-top: 20px;">';
+      for (var a = 0; a < actions.length; a++) {
+        var act = actions[a];
+        var btnColor = act.color || '#6b7280';
+        var btnUrl = finalUrl + (act.query || '');
+        actionButtonsHtml += '<a href="' + btnUrl + '" style="display: inline-block; margin: 5px 6px; padding: 10px 22px; background-color: ' + btnColor + '; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 13px;">' + (act.label || 'Action') + '</a>';
+      }
+      actionButtonsHtml += '</div>';
+    }
+
     var safeReqId = String(reqId || '').replace(/</g, '&lt;');
     var safeTitle = String(title || 'System Update').replace(/</g, '&lt;');
     var safeEvent = String(eventTitle || '').replace(/</g, '&lt;');
+
+    var headerBg = isResearch ? 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' :
+                   isProduction ? 'linear-gradient(135deg, #0891b2 0%, #0e7490 100%)' :
+                   (color || STATUS_COLORS.INFO);
+    var headerStyle = (requestType && (isResearch || isProduction))
+      ? 'background: ' + headerBg + '; padding: 30px; text-align: center;'
+      : 'background-color: ' + (color || STATUS_COLORS.INFO) + '; padding: 30px; text-align: center;';
+
     return '<div style="background-color: #f3f4f6; padding: 20px; font-family: \'Segoe UI\', Arial, sans-serif;">' +
       '<div style="max-width: 600px; width: 100%; box-sizing: border-box; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">' +
-      '<div style="background-color: ' + (color || STATUS_COLORS.INFO) + '; padding: 30px; text-align: center;">' +
+      '<div style="' + headerStyle + '">' +
       '<div style="color: #ffffff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px;">Miklens Digital Requisition</div>' +
       '<h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 900;">' + safeEvent + '</h1>' +
-      '<div style="color: rgba(255,255,255,0.8); font-size: 14px; margin-top: 5px; font-weight: bold;">' + safeTitle + '</div></div>' +
+      '<div style="color: rgba(255,255,255,0.8); font-size: 14px; margin-top: 5px; font-weight: bold;">' + safeTitle + '</div>' +
+      typeBadgeHtml + '</div>' +
       '<div style="padding: 30px;">' +
       '<p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin-top: 0;">This is an automated notification regarding <b>#' + safeReqId + '</b>.</p>' +
       detailsHtml +
-      '<div style="text-align: center; margin-top: 30px;">' +
+      actionButtonsHtml +
+      '<div style="text-align: center; margin-top: 20px;">' +
       '<a href="' + finalUrl + '" style="background-color: ' + (color || STATUS_COLORS.INFO) + '; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block;">Open Application</a></div>' +
-      '<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #f3f4f6; color: #9ca3af; font-size: 11px; text-align: center;">© ' + new Date().getFullYear() + ' Miklens Digital Inventory Sync • Automated Alert</div>' +
+      '<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #f3f4f6; color: #9ca3af; font-size: 11px; text-align: center;">&copy; ' + new Date().getFullYear() + ' Miklens Digital Inventory Sync &bull; Automated Alert</div>' +
       '</div></div></div>';
   }
 
@@ -115,24 +153,31 @@
     var to = '';
     var subject = '';
 
+    var reqType = (payload.requestType || '').toString().trim();
+    var isResearch = reqType.toLowerCase() === 'research';
+    var isProduction = reqType.toLowerCase() === 'production' || (!isResearch && reqType !== '');
+
     if (type === 'approval_needed') {
-      eventTitle = 'New Requisition Submitted';
-      title = 'New Requisition – Approval Required';
-      color = STATUS_COLORS.INFO;
+      var typeLabel = isResearch ? 'Research' : 'Production';
+      eventTitle = 'New ' + typeLabel + ' Requisition';
+      title = typeLabel + ' Request – Approval Required';
+      color = isResearch ? STATUS_COLORS.RESEARCH : STATUS_COLORS.PRODUCTION;
       var reqDate = payload.requestedAt ? new Date(payload.requestedAt).toLocaleString() : '';
       details = [
         { label: 'Request ID', value: payload.requestId || '' },
+        { label: 'Type', value: typeLabel },
         { label: 'Requested by', value: (payload.requesterName || '') + (payload.requesterEmail ? ' (' + payload.requesterEmail + ')' : '') },
         { label: 'Product', value: payload.productName || '' },
         { label: 'Quantity', value: (payload.requestedQty != null ? payload.requestedQty : '') + ' ' + (payload.unit || '') },
         { label: 'Request date', value: reqDate },
         { label: 'Action', value: 'Please approve or reject in the app.' }
       ];
+      if (payload.notes) details.splice(details.length - 1, 0, { label: 'Notes / Purpose', value: payload.notes });
       var managersList = await getManagerAdminEmails();
       to = (payload.managerEmail || '').trim();
       if (!to) to = managersList.length ? managersList.join(',') : '';
       var ccApproval = managersList.filter(function (e) { return to.indexOf(e) < 0; }).join(',');
-      subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] New Requisition – ' + (payload.requesterName || 'Employee') + ' – ' + (payload.productName || '') + ' – Approval Required';
+      subject = '[MIKLENS ' + typeLabel.toUpperCase() + ' REQ-' + (payload.requestId || '') + '] New ' + typeLabel + ' Requisition – ' + (payload.requesterName || 'Employee') + ' – ' + (payload.productName || '') + ' – Approval Required';
     } else if (type === 'reservation_released') {
       eventTitle = 'Reservation Released';
       title = 'Reservation Expired';
@@ -340,7 +385,30 @@
       subject = '[MIKLENS] ' + eventTitle;
     }
     if (!to) return null;
-    var html = buildHtml(reqId, eventTitle, title, details, color, backendConfig.APP_URL);
+
+    var actions = [];
+    var isManagerEmail = false;
+    if (type === 'approval_needed') {
+      isManagerEmail = true;
+      actions.push({ label: 'Approve / Reject', color: '#10b981', query: '' });
+      actions.push({ label: 'Delete Request', color: '#ef4444', query: '' });
+    } else if (type === 'request_approved' || type === 'request_on_hold' || type === 'partial_issued') {
+      actions.push({ label: 'Edit Request', color: '#3b82f6', query: '' });
+      actions.push({ label: 'Cancel Request', color: '#f59e0b', query: '' });
+    } else if (type === 'request_rejected') {
+      actions.push({ label: 'Submit New Request', color: '#3b82f6', query: '' });
+    } else if (type === 'materials_issued' || type === 'production_completed' || type === 'production_paused') {
+      actions.push({ label: 'View Details', color: '#3b82f6', query: '' });
+    } else if (type === 'correction_requested') {
+      isManagerEmail = true;
+      actions.push({ label: 'Review & Approve', color: '#10b981', query: '' });
+      actions.push({ label: 'Delete Request', color: '#ef4444', query: '' });
+    }
+
+    var html = buildHtml(reqId, eventTitle, title, details, color, backendConfig.APP_URL, {
+      requestType: reqType,
+      actions: actions
+    });
     var cc = (type === 'approval_needed' && ccApproval) ? ccApproval : '';
     return { to: to, subject: subject, html: html, cc: cc || '' };
   }
@@ -1075,12 +1143,14 @@
     await docRef.set(safe);
     await pushNotificationQueue('approval_needed', {
       requestId: newId,
+      requestType: type,
       managerEmail: (payload.ManagerEmail || '').toString().trim(),
       productName: payload.ProductName || '',
       requesterName: payload.EmployeeName || '',
       requesterEmail: payload.EmployeeEm || '',
       requestedQty: payload.RequestedQty,
       unit: payload.Unit || '',
+      notes: notes,
       requestedAt: payload.CreatedDate || new Date().toISOString()
     });
     logRequestToReminderSheet(payload.EmployeeEm || '', payload.EmployeeName || '');
@@ -1147,6 +1217,7 @@
         try {
           pushNotificationQueue('materials_issued', {
             requestId: id,
+            requestType: d.Type || d.type || '',
             requesterEmail: (d.EmployeeEm || d.requesterEmail || '').trim(),
             productName: d.ProductName || d.productName || '',
             quantity: d.RequestedQty != null ? d.RequestedQty : d.quantity,
@@ -1161,6 +1232,7 @@
         try {
           pushNotificationQueue('partial_issued', {
             requestId: id,
+            requestType: d2.Type || d2.type || '',
             requesterEmail: (d2.EmployeeEm || d2.requesterEmail || '').trim(),
             productName: d2.ProductName || d2.productName || '',
             partialQty: partialQtyNum,
@@ -1245,6 +1317,7 @@
         try {
           pushNotificationQueue('materials_issued', {
             requestId: id,
+            requestType: data.Type || data.type || '',
             requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
             productName: data.ProductName || data.productName || '',
             quantity: data.RequestedQty != null ? data.RequestedQty : data.quantity,
@@ -1254,11 +1327,11 @@
         } catch (e) { console.warn('materials_issued email:', e); }
       }
     } else if (action === 'APPROVED') {
-      // Manager approved first – reserve stock until Store issues
       try { await upsertRequisitionReservation(id, data, 'reserved'); } catch (e) { /* non-fatal */ }
       try {
         await pushNotificationQueue('request_approved', {
           requestId: id,
+          requestType: data.Type || data.type || '',
           requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
           requesterName: (data.EmployeeName || data.requesterName || '').trim(),
           productName: data.ProductName || data.productName || '',
@@ -1272,6 +1345,7 @@
       try {
         await pushNotificationQueue('request_rejected', {
           requestId: id,
+          requestType: data.Type || data.type || '',
           requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
           requesterName: (data.EmployeeName || data.requesterName || '').trim(),
           productName: data.ProductName || data.productName || '',
@@ -1286,6 +1360,7 @@
       try {
         await pushNotificationQueue('request_on_hold', {
           requestId: id,
+          requestType: data.Type || data.type || '',
           requesterEmail: (data.EmployeeEm || data.requesterEmail || '').trim(),
           requesterName: (data.EmployeeName || data.requesterName || '').trim(),
           productName: data.ProductName || data.productName || '',
@@ -1572,6 +1647,7 @@
           });
           await pushNotificationQueue('production_completed', {
             requestId: linkedReqId,
+            requestType: reqData.Type || reqData.type || '',
             requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
             requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
             productName: reqData.ProductName || '',
@@ -1582,6 +1658,7 @@
         } else if (status === 'paused') {
           await pushNotificationQueue('production_paused', {
             requestId: linkedReqId,
+            requestType: reqData.Type || reqData.type || '',
             requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
             requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
             productName: reqData.ProductName || '',
@@ -1745,6 +1822,7 @@
     try {
       pushNotificationQueue('correction_requested', {
         requestId: id,
+        requestType: data.Type || data.type || '',
         productName: data.ProductName || data.productName || '',
         requestedBy: data.EmployeeName || data.requesterName || params.user || '',
         requestedByEmail: data.EmployeeEm || data.requesterEmail || '',
@@ -1784,6 +1862,7 @@
       updates.CurrentStage = 'PAUSED';
       await pushNotificationQueue('production_paused', {
         requestId: id,
+        requestType: reqData.Type || reqData.type || '',
         requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
         requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
         productName: reqData.ProductName || '',
@@ -1797,6 +1876,7 @@
       updates.CurrentStage = 'Production Completed';
       await pushNotificationQueue('production_completed', {
         requestId: id,
+        requestType: reqData.Type || reqData.type || '',
         requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
         requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
         productName: reqData.ProductName || '',
@@ -1809,6 +1889,7 @@
       updates.CurrentStage = 'Cancelled';
       await pushNotificationQueue('production_cancelled', {
         requestId: id,
+        requestType: reqData.Type || reqData.type || '',
         requesterEmail: (reqData.EmployeeEm || reqData.requesterEmail || '').trim(),
         requesterName: (reqData.EmployeeName || reqData.requesterName || '').trim(),
         productName: reqData.ProductName || '',
