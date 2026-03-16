@@ -143,6 +143,26 @@
     return emails;
   }
 
+  async function getStoreInchargeEmails() {
+    if (!db) return [];
+    var snap = await db.collection('Users').get();
+    var emails = [];
+    snap.forEach(function (doc) {
+      var d = doc.data();
+      var role = (d.Role || d.role || '').toLowerCase().trim().replace(/[_\-]/g, ' ');
+      var email = (d.Email || d.email || '').trim();
+      if (email && (role === 'store incharge' || role === 'store')) emails.push(email);
+    });
+    return emails;
+  }
+
+  var STORE_INCHARGE_CC_TYPES = [
+    'approval_needed', 'request_approved', 'request_edited', 'request_cancelled', 'request_deleted',
+    'request_rejected', 'request_on_hold', 'correction_requested',
+    'materials_issued', 'partial_issued', 'reservation_released',
+    'production_completed', 'production_paused', 'production_cancelled'
+  ];
+
   async function buildEmailContent(type, data) {
     var payload = data && typeof data === 'object' ? data : {};
     var reqId = payload.requestId || payload.formulaRequestId || payload.dispatchId || '';
@@ -475,7 +495,36 @@
       requestType: reqType,
       actions: actions
     });
-    var cc = (type === 'approval_needed' && ccApproval) ? ccApproval : '';
+
+    var cc = '';
+    var allManagers = [];
+    var storeIncharge = [];
+    try { allManagers = await getManagerAdminEmails(); } catch (e) {}
+    try { if (STORE_INCHARGE_CC_TYPES.indexOf(type) >= 0) storeIncharge = await getStoreInchargeEmails(); } catch (e) {}
+    if (type === 'approval_needed' && ccApproval) {
+      var toListA = to.split(',').map(function (e) { return e.trim().toLowerCase(); });
+      var ccListA = ccApproval ? ccApproval.split(',').map(function (e) { return e.trim(); }) : [];
+      allManagers.forEach(function (m) {
+        if (toListA.indexOf(m.toLowerCase()) < 0 && ccListA.map(function (c) { return c.toLowerCase(); }).indexOf(m.toLowerCase()) < 0) ccListA.push(m);
+      });
+      storeIncharge.forEach(function (s) {
+        if (toListA.indexOf(s.toLowerCase()) < 0 && ccListA.map(function (c) { return c.toLowerCase(); }).indexOf(s.toLowerCase()) < 0) ccListA.push(s);
+      });
+      cc = ccListA.join(',');
+    } else {
+      var toList = to.split(',').map(function (e) { return e.trim().toLowerCase(); });
+      var ccList = [];
+      allManagers.forEach(function (m) {
+        if (toList.indexOf(m.toLowerCase()) < 0 && ccList.indexOf(m.toLowerCase()) < 0) ccList.push(m);
+      });
+      storeIncharge.forEach(function (s) {
+        if (toList.indexOf(s.toLowerCase()) < 0 && ccList.indexOf(s.toLowerCase()) < 0) ccList.push(s);
+      });
+      var reqEmail = (payload.requesterEmail || '').trim().toLowerCase();
+      if (reqEmail && toList.indexOf(reqEmail) < 0 && ccList.indexOf(reqEmail) < 0) ccList.push(reqEmail);
+      cc = ccList.join(',');
+    }
+
     return { to: to, subject: subject, html: html, cc: cc || '' };
   }
 
