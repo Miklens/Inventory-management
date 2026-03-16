@@ -4000,16 +4000,64 @@
                             chatLog.scrollTop = chatLog.scrollHeight;
                         }
 
+                        function parseQuestionForDateRange(q) {
+                            const text = String(q || '').toLowerCase();
+                            const now = new Date();
+                            const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                            let from = null, to = null;
+
+                            if (/\btoday\b/.test(text)) {
+                                const d = startOfDay(now);
+                                from = new Date(d); to = new Date(d); to.setDate(to.getDate() + 1);
+                            } else if (/\byesterday\b/.test(text)) {
+                                const d = startOfDay(now); d.setDate(d.getDate() - 1);
+                                from = new Date(d); to = new Date(d); to.setDate(to.getDate() + 1);
+                            } else {
+                                const m = text.match(/(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{2,4})/);
+                                if (m) {
+                                    const d = parseInt(m[1], 10);
+                                    const mo = parseInt(m[2], 10) - 1;
+                                    let y = parseInt(m[3], 10);
+                                    if (y < 100) y = 2000 + y;
+                                    const dt = new Date(y, mo, d);
+                                    if (!isNaN(dt.getTime())) {
+                                        const s = startOfDay(dt);
+                                        from = new Date(s); to = new Date(s); to.setDate(to.getDate() + 1);
+                                    }
+                                }
+                            }
+                            return { from, to };
+                        }
+
                         async function handleAsk(question) {
                             if (!question || !question.trim()) return;
-                            appendMessage('user', question.trim());
+                            const qTrim = question.trim();
+                            appendMessage('user', qTrim);
                             input.value = '';
                             appendMessage('assistant', '<span class="text-gray-500 text-xs">Thinking...</span>');
 
-                            // Prepare data summary (keep size reasonable)
+                            // Prepare data summary with smart slicing for dates
+                            const allTx = appState.transactions || [];
+                            const { from, to } = parseQuestionForDateRange(qTrim);
+                            let txSlice = allTx;
+                            if (from && to) {
+                                txSlice = allTx.filter(t => {
+                                    if (!t.date) return false;
+                                    const d = new Date(t.date);
+                                    return d >= from && d < to;
+                                });
+                                if (txSlice.length === 0) {
+                                    txSlice = allTx.slice(-300);
+                                } else if (txSlice.length > 1000) {
+                                    txSlice = txSlice.slice(-1000);
+                                }
+                            } else {
+                                txSlice = allTx.slice(-500);
+                            }
+
                             const snapshot = {
                                 inventory: appState.inventory || {},
-                                transactions: (appState.transactions || []).slice(-500),
+                                transactions: txSlice,
                                 suppliers: appState.suppliers || [],
                                 customers: appState.customers || []
                             };
@@ -4017,7 +4065,7 @@
                             const providerHint = providerSelect.value === 'auto' ? null : providerSelect.value;
                             try {
                                 const result = await callAiWithFallback({
-                                    question: question.trim(),
+                                    question: qTrim,
                                     dataSummary: snapshot,
                                     providerHint: providerHint,
                                     modelHint: null
