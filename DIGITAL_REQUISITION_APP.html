@@ -909,16 +909,20 @@
                     { id: 'pending-issue', label: 'Pending Issue', icon: '📦' },
                     { id: 'partial-issue', label: 'Partial / Incomplete', icon: '📋' },
                     { id: 'wip-management', label: 'WIP Monitor', icon: '⚙️' },
+                    { id: 'request-dispatch', label: 'Request Dispatch', icon: '🚚' },
+                    { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' },
                     { id: 'issued-items', label: 'Issued Items', icon: '✅' }
                 ],
                 'Employee': [
                     { id: 'my-requests', label: 'My Requests', icon: '📋' },
                     { id: 'wip-management', label: 'Production Tasks', icon: '🏭' },
+                    { id: 'request-dispatch', label: 'Request Dispatch', icon: '🚚' },
+                    { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' },
                     { id: 'new-request', label: 'New Request', icon: '➕' },
                     { id: 'request-new-formula', label: 'Request New Formula', icon: '🧪' }
                 ],
-                'Manager': managerAdminTabs,
-                'Admin': managerAdminTabs
+                'Manager': [...managerAdminTabs.slice(0, 6), { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' }, ...managerAdminTabs.slice(6)],
+                'Admin': [...managerAdminTabs.slice(0, 6), { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' }, ...managerAdminTabs.slice(6)]
             };
 
             const tabs = portals[role] || [];
@@ -949,6 +953,8 @@
                     'partial-issue': c.PARTIAL_ISSUE || 0,
                     'wip-management': c.WIP || 0,
                     'dispatch-queue': c.DISPATCH || 0,
+                    'request-dispatch': (c.DISPATCH || 0) + (c.PENDING_ISSUE || 0),
+                    'request-dispatch-direct': c.PENDING_ISSUE || 0,
                     'pending-record': c.PENDING_RECORD || 0,
                     'pending-approvals': c.PENDING_APPROVALS || 0,
                     'formula-requests': c.FORMULA_REQUESTS || 0,
@@ -1001,7 +1007,7 @@
         function setCachedView(viewId, html) {
             viewCache[viewId] = { html: html, ts: Date.now() };
         }
-        const CACHEABLE_VIEWS = ['dashboard','my-requests','pending-approvals','all-requests','pending-issue','partial-issue','pending-record','wip-management','dispatch-queue','dispatch','issued-items','pending-dispatch-approvals','master_archive','formula-requests'];
+        const CACHEABLE_VIEWS = ['dashboard','my-requests','pending-approvals','all-requests','pending-issue','partial-issue','pending-record','wip-management','dispatch-queue','dispatch','request-dispatch','request-dispatch-direct','dispatch-from-stock','issued-items','pending-dispatch-approvals','master_archive','formula-requests'];
 
         // Detail panel cache (in-memory, no localStorage)
         const DETAIL_CACHE_TTL_MS = 8000;
@@ -1101,6 +1107,12 @@
                     break;
                 case 'dispatch':
                     renderDispatchView();
+                    break;
+                case 'request-dispatch':
+                    renderRequestDispatchView(role);
+                    break;
+                case 'dispatch-from-stock':
+                    renderDispatchFromStockView();
                     break;
                 case 'pending-dispatch-approvals':
                     renderPendingDispatchApprovals();
@@ -2285,7 +2297,7 @@
         // Pagination State
         let stagePagination = {};
 
-        async function loadStageRequests(stage, containerId, append = false, viewIdForCache) {
+        async function loadStageRequests(stage, containerId, append = false, viewIdForCache, extraParams) {
             const LIMIT = 20;
             if (!append) {
                 stagePagination[stage] = 1;
@@ -2298,7 +2310,9 @@
             if (!append && viewIdForCache) container.innerHTML = getSkeletonListHTML(4);
 
             try {
-                const data = await callBackend('get_requests_by_stage', { stage: stage, page: page, limit: LIMIT, light: '1' });
+                const params = { stage: stage, page: page, limit: LIMIT, light: '1' };
+                if (extraParams && typeof extraParams === 'object') Object.assign(params, extraParams);
+                const data = await callBackend('get_requests_by_stage', params);
 
                 // Remove existing "Load More" button if any
                 const existingBtn = document.getElementById(`btn-load-more-${stage}`);
@@ -2444,17 +2458,20 @@
             }
         }
 
-        function openRequestDispatchModal(requestId, productName, maxQty, unit) {
+        function openRequestDispatchModal(requestId, productName, maxQty, unit, isDirectFromStock) {
             const existing = document.getElementById('requestDispatchModal');
             if (existing) existing.remove();
+            const isDirect = !!isDirectFromStock;
+            const title = isDirect ? '📤 Direct Dispatch from Stock' : '🚚 Request Dispatch';
+            const desc = isDirect ? 'Items already in stock – no production needed. Quantity will be deducted from Main Inventory after Manager approval.' : 'Quantity will be deducted from Main Inventory after Manager approval.';
             const modal = document.createElement('div');
             modal.id = 'requestDispatchModal';
             modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110]';
             modal.innerHTML = `
-                <div class="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl mx-4 border-t-4 border-green-500">
-                    <h2 class="text-xl font-bold text-gray-800 mb-2">🚚 Request Dispatch</h2>
-                    <p class="text-sm text-gray-500 mb-4">Product: <strong>${(productName || '').replace(/</g, '&lt;')}</strong>. Quantity will be deducted from Main Inventory after Manager approval.</p>
-                    <p class="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">💡 You can request partial dispatch (e.g. send some today, rest later). Submit multiple requests if needed.</p>
+                <div class="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl mx-4 border-t-4 ${isDirect ? 'border-teal-500' : 'border-green-500'}">
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">${title}</h2>
+                    <p class="text-sm text-gray-500 mb-4">Product: <strong>${(productName || '').replace(/</g, '&lt;')}</strong>. ${desc}</p>
+                    <p class="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">💡 You can request any quantity (partial or full). Submit multiple requests if needed.</p>
                     <div class="space-y-4">
                         <div>
                             <label class="block text-xs font-bold text-gray-600 mb-1">Quantity to dispatch</label>
@@ -2463,7 +2480,7 @@
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-600 mb-1">Remarks (optional)</label>
-                            <input type="text" id="dispatchRemarksInput" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500" placeholder="e.g. Partial send today; rest as FG">
+                            <input type="text" id="dispatchRemarksInput" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500" placeholder="${isDirect ? 'e.g. Direct from stock – no production needed' : 'e.g. Partial send today; rest as FG'}">
                         </div>
                     </div>
                     <div class="flex gap-3 mt-6">
@@ -3044,9 +3061,11 @@
                 const stockShort = req.stockSummary && !req.stockSummary.allSufficient;
                 const fullIssueDisabled = stockShort ? ' disabled title="Use Issue Partial when items are short, or add stock in Main Inventory first."' : '';
                 const fullIssueClass = stockShort ? 'flex-1 bg-blue-400 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg opacity-60 cursor-not-allowed' : 'flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-blue-700 transition-all';
+                const maxQty = parseFloat(req.requestedQty || req.quantity || 0) || 0;
                     actionBtns = `
                     <button type="button"${fullIssueDisabled} onclick="openIssueMaterialsWizard('${req.id.replace(/'/g, "\\'")}')" class="${fullIssueClass}">${btnLabel}</button>
                     <button type="button" onclick="openPartialIssueModal()" class="flex-1 bg-indigo-500 text-white font-black py-3 rounded-xl border-b-4 border-indigo-700 uppercase text-[10px] shadow-lg hover:bg-indigo-600 transition-all">📦 Issue Partial</button>
+                    <button type="button" onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQty}, '${(req.unit || '').replace(/'/g, "\\'")}', true)" class="flex-1 bg-teal-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-teal-700 transition-all border-b-4 border-teal-700">📤 Direct Dispatch from Stock</button>
                 `;
 
                 // Cancellation Button for Requester
@@ -3054,11 +3073,20 @@
                 if (isRequester && ['SUBMITTED', 'PENDING', 'APPROVED', 'APPROVE_REQUEST', 'CORRECTION_REQUIRED'].includes(req.status) && stage !== 'COMPLETED' && stage !== 'CANCELLED') {
                     actionBtns += `<button onclick="cancelRequest(event, '${req.id}')" class="flex-1 bg-gray-100 text-gray-500 font-bold py-3 rounded-xl uppercase text-[10px] hover:bg-red-50 hover:text-red-600 transition-all mt-2">🛑 Cancel Request</button>`;
                 }
-            } else if (userRole === 'Manager' || userRole === 'Admin') {
+            }
+            if ((stage === 'AWAITING MATERIAL ISSUE' || stage === 'PENDING STORE & MANAGER' || (stage && (stage.indexOf('PARTIAL OK') >= 0 || stage.toUpperCase().indexOf('PENDING MANAGER') >= 0))) && ['APPROVED', 'APPROVE_REQUEST'].includes(req.status) && (userRole === 'Manager' || userRole === 'Admin' || (userRole === 'Employee' && (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim())))) {
+                const maxQtyDirect = parseFloat(req.requestedQty || req.quantity || 0) || 0;
+                actionBtns = (actionBtns || '') + `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQtyDirect}, '${(req.unit || '').replace(/'/g, "\\'")}', true)" class="flex-1 bg-teal-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-teal-700 transition-all border-b-4 border-teal-700">📤 Direct Dispatch from Stock</button>`;
+            }
+            if ((stage === 'AWAITING DISPATCH' || (stage && stage.toUpperCase && stage.toUpperCase().indexOf('DISPATCH') >= 0)) && (userRole === 'Store Incharge' || (userRole === 'Employee' && (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim())))) {
+                const maxQty = parseFloat(req.requestedQty || req.quantity || 0) || 0;
+                actionBtns = (actionBtns || '') + `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQty}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">🚚 Request Dispatch</button>`;
+            }
+            if (userRole === 'Manager' || userRole === 'Admin') {
                 if (stage === 'AWAITING PRODUCTION RECORDING') {
-                    actionBtns = `<button onclick="handleStageAction(event, '${req.id}', 'RECORD')" class="flex-1 bg-indigo-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-indigo-700 transition-all">Record Production (WIP)</button>`;
-                } else if (stage === 'AWAITING DISPATCH') {
-                    actionBtns = `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${parseFloat(req.requestedQty || req.quantity || 0) || 0}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">Request Dispatch</button>`;
+                    actionBtns = (actionBtns || '') + `<button onclick="handleStageAction(event, '${req.id}', 'RECORD')" class="flex-1 bg-indigo-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-indigo-700 transition-all">Record Production (WIP)</button>`;
+                } else if (stage === 'AWAITING DISPATCH' && (!actionBtns || actionBtns.indexOf('openRequestDispatchModal') < 0)) {
+                    actionBtns = (actionBtns || '') + `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${parseFloat(req.requestedQty || req.quantity || 0) || 0}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">Request Dispatch</button>`;
                 }
             }
             if ((req.status === 'PRODUCED' || (stage && stage.includes('DISPATCH'))) && req.status !== 'DISPATCHED') {
@@ -3730,6 +3758,168 @@
                 </div>
             `;
             loadStageRequests('DISPATCH', 'dispatchViewList', false, 'dispatch');
+        }
+
+        function renderRequestDispatchView(role) {
+            const contentArea = document.getElementById('contentArea');
+            const isEmployee = (role || '').toLowerCase().indexOf('employee') >= 0;
+            const desc = 'Request dispatch for produced batches or <strong>Direct Dispatch from Stock</strong> when items already exist in inventory. Submit for Manager approval; once approved, it syncs to Main Inventory.';
+            contentArea.innerHTML = `
+                <div class="fade-in">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">🚚 Request Dispatch</h2>
+                    <p class="text-sm text-gray-500 mb-4">${desc}</p>
+                    <h3 class="text-sm font-bold text-teal-700 uppercase tracking-wider mt-6 mb-2">📤 Direct Dispatch from Stock</h3>
+                    <p class="text-xs text-gray-500 mb-3">Approved requests – items already in stock, no production needed.</p>
+                    <div class="space-y-4" id="requestDispatchDirectList">
+                        <div class="text-center py-8 text-gray-400 text-sm">Loading...</div>
+                    </div>
+                    <h3 class="text-sm font-bold text-green-700 uppercase tracking-wider mt-8 mb-2">🚢 Produced Batches</h3>
+                    <p class="text-xs text-gray-500 mb-3">Produced batches ready for dispatch.</p>
+                    <div class="space-y-4" id="requestDispatchList">
+                        <div class="text-center py-8 text-gray-400 text-sm">Loading...</div>
+                    </div>
+                </div>
+            `;
+            const directParams = { directDispatchOnly: '1' };
+            if (isEmployee && currentUser && currentUser.email) directParams.requesterEmail = currentUser.email;
+            loadStageRequests('PENDING_ISSUE', 'requestDispatchDirectList', false, 'request-dispatch-direct', directParams);
+            loadStageRequests('DISPATCH', 'requestDispatchList', false, 'request-dispatch', isEmployee ? { requesterEmail: (currentUser && currentUser.email) || '' } : null);
+        }
+
+        async function renderDispatchFromStockView() {
+            const contentArea = document.getElementById('contentArea');
+            contentArea.innerHTML = `
+                <div class="fade-in">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">📤 Dispatch from Stock</h2>
+                    <p class="text-sm text-gray-500 mb-6">Dispatch finished goods directly from Main Inventory – no requisition needed. For products produced without approval or items already in stock. Syncs to MIKLENS Main Inventory and updates customer records.</p>
+                    <div class="bg-white rounded-xl border border-gray-200 p-6 max-w-xl">
+                        <form id="standaloneDispatchForm" class="space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">Product (Finished Good)</label>
+                                <select id="standaloneProduct" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500">
+                                    <option value="">Loading...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">Quantity</label>
+                                <input type="number" id="standaloneQty" step="0.01" min="0.01" required placeholder="0" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500">
+                                <span id="standaloneUnit" class="text-xs text-gray-500 ml-1"></span>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">Customer</label>
+                                <div class="flex gap-2">
+                                    <select id="standaloneCustomer" class="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500">
+                                        <option value="">Select customer...</option>
+                                    </select>
+                                    <button type="button" onclick="openAddCustomerForDispatchModal()" class="px-4 py-2 bg-teal-100 text-teal-700 rounded-lg font-bold text-xs hover:bg-teal-200 transition-all">+ Add</button>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">Remarks (optional)</label>
+                                <input type="text" id="standaloneRemarks" placeholder="e.g. Direct dispatch" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500">
+                            </div>
+                            <button type="submit" id="btnStandaloneDispatch" class="w-full py-3 bg-teal-600 text-white font-black rounded-xl uppercase text-sm hover:bg-teal-700 transition-all shadow-lg">📤 Dispatch</button>
+                        </form>
+                    </div>
+                </div>
+            `;
+            try {
+                const data = await callBackend('get_inventory_for_standalone_dispatch', {});
+                const fg = (data.finishedGoods || []);
+                const cust = (data.customers || []);
+                const productSelect = document.getElementById('standaloneProduct');
+                const customerSelect = document.getElementById('standaloneCustomer');
+                if (productSelect) {
+                    productSelect.innerHTML = '<option value="">Select product...</option>' + fg.map(p => `<option value="${(p.name || p.id || '').replace(/"/g, '&quot;')}" data-unit="${(p.unit || 'Units').replace(/"/g, '&quot;')}" data-id="${p.id || ''}">${(p.name || p.id || '').replace(/</g, '&lt;')} (${p.quantity || 0} ${p.unit || 'Units'})</option>`).join('');
+                    productSelect.onchange = function() {
+                        const opt = productSelect.options[productSelect.selectedIndex];
+                        const unit = opt ? opt.getAttribute('data-unit') || 'Units' : 'Units';
+                        const unitEl = document.getElementById('standaloneUnit');
+                        if (unitEl) unitEl.textContent = unit;
+                    };
+                }
+                if (customerSelect) {
+                    customerSelect.innerHTML = '<option value="">Select customer...</option>' + cust.map(c => `<option value="${c.id}">${(c.name || '').replace(/</g, '&lt;')}</option>`).join('');
+                }
+                document.getElementById('standaloneDispatchForm').onsubmit = async function(e) {
+                    e.preventDefault();
+                    const productOpt = productSelect.options[productSelect.selectedIndex];
+                    const productName = productOpt ? productOpt.value : '';
+                    const unit = productOpt ? (productOpt.getAttribute('data-unit') || 'Units') : 'Units';
+                    const qty = parseFloat(document.getElementById('standaloneQty').value) || 0;
+                    const customerVal = document.getElementById('standaloneCustomer').value;
+                    const customerId = (customerVal && customerVal !== '__new__') ? parseFloat(customerVal) : null;
+                    const newCustomerName = (customerVal === '__new__' ? (window._pendingNewCustomerName || '').trim() : '');
+                    const remarks = (document.getElementById('standaloneRemarks') || {}).value || '';
+                    if (!productName || qty <= 0) { showToast('Select product and enter quantity', 'warning'); return; }
+                    if (!customerId && !newCustomerName) { showToast('Select a customer or add new customer', 'warning'); return; }
+                    const btn = document.getElementById('btnStandaloneDispatch');
+                    if (btn) { btn.disabled = true; btn.textContent = 'Dispatching...'; }
+                    showToast('Dispatching...', 'info');
+                    try {
+                        const res = await callBackendPost('standalone_dispatch_from_stock', {
+                            productName, quantity: qty, unit,
+                            customerId: customerId || undefined,
+                            newCustomerName: newCustomerName || undefined,
+                            user: currentUser?.name || currentUser?.email || 'User',
+                            remarks
+                        });
+                        if (res.result === 'success') {
+                            showToast('Dispatch recorded. Main Inventory updated.', 'success');
+                            document.getElementById('standaloneQty').value = '';
+                            document.getElementById('standaloneRemarks').value = '';
+                            window._pendingNewCustomerName = '';
+                            renderDispatchFromStockView();
+                        } else {
+                            showToast(userFriendlyError(res.error), 'error');
+                        }
+                    } catch (err) {
+                        showToast('Dispatch failed. ' + (err.message || ''), 'error');
+                    }
+                    if (btn) { btn.disabled = false; btn.textContent = '📤 Dispatch'; }
+                };
+            } catch (err) {
+                showToast('Failed to load inventory. Ensure Main Inventory is linked.', 'error');
+                const productSelect = document.getElementById('standaloneProduct');
+                if (productSelect) productSelect.innerHTML = '<option value="">Failed to load</option>';
+            }
+        }
+
+        function openAddCustomerForDispatchModal() {
+            const existing = document.getElementById('addCustomerDispatchModal');
+            if (existing) existing.remove();
+            const modal = document.createElement('div');
+            modal.id = 'addCustomerDispatchModal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110]';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl mx-4 border-t-4 border-teal-500">
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">Add Customer</h2>
+                    <p class="text-sm text-gray-500 mb-4">New customer will be added to Main Inventory and used for this dispatch.</p>
+                    <input type="text" id="newCustomerNameInput" placeholder="Customer name" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 mb-4">
+                    <div class="flex gap-3">
+                        <button type="button" onclick="document.getElementById('addCustomerDispatchModal').remove()" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold">Cancel</button>
+                        <button type="button" onclick="submitNewCustomerForDispatch()" class="flex-1 py-2 bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700">Add & Select</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            setTimeout(() => document.getElementById('newCustomerNameInput')?.focus(), 100);
+        }
+
+        function submitNewCustomerForDispatch() {
+            const name = (document.getElementById('newCustomerNameInput')?.value || '').trim();
+            if (!name) { showToast('Enter customer name', 'warning'); return; }
+            window._pendingNewCustomerName = name;
+            document.getElementById('addCustomerDispatchModal')?.remove();
+            const custSelect = document.getElementById('standaloneCustomer');
+            if (custSelect) {
+                const opt = document.createElement('option');
+                opt.value = '__new__';
+                opt.textContent = name + ' (New)';
+                opt.selected = true;
+                custSelect.appendChild(opt);
+            }
+            showToast('Customer "' + name + '" will be added on dispatch.', 'info');
         }
 
         function closeDetails() {
