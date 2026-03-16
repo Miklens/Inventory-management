@@ -1969,6 +1969,52 @@
     return ok({ message: 'Item removed' });
   }
 
+  async function deleteRequest(params) {
+    var id = params.id;
+    if (!id) return fail(new Error('No request id'));
+    var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
+    var allowed = await hasRole(actorId, ['Manager', 'Admin']);
+    if (!allowed) return fail(new Error('Only Manager or Admin can delete requests'));
+    var ref = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
+    var snap = await ref.get();
+    if (!snap.exists) return fail(new Error('Request not found'));
+    await ref.delete();
+    var resRef = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
+    try { var resSnap = await resRef.get(); if (resSnap.exists) await resRef.delete(); } catch (e) {}
+    await auditLog('requisition_delete', actorId, { requestId: id, reason: params.reason || '' });
+    return ok({ message: 'Request deleted permanently' });
+  }
+
+  async function editRequest(params) {
+    var id = params.id;
+    if (!id) return fail(new Error('No request id'));
+    var email = (params.email || '').toLowerCase().trim();
+    if (!email) return fail(new Error('No email'));
+    var ref = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
+    var snap = await ref.get();
+    if (!snap.exists) return fail(new Error('Request not found'));
+    var data = snap.data();
+    var ownerEmail = (data.EmployeeEm || data.requesterEmail || '').toLowerCase().trim();
+    var actorId = adminIdentifier(params) || email;
+    var isOwner = ownerEmail === email;
+    var isAdmin = await hasRole(actorId, ['Manager', 'Admin']);
+    if (!isOwner && !isAdmin) return fail(new Error('Only the requester or a Manager/Admin can edit this request'));
+    var status = (data.Status || '').toUpperCase();
+    var editableStatuses = ['SUBMITTED', 'PENDING', 'CORRECTION_REQUIRED', 'ON_HOLD'];
+    if (!editableStatuses.includes(status) && !isAdmin) return fail(new Error('Request can only be edited while Pending or On Hold (current: ' + status + ')'));
+    var updates = {};
+    if (params.quantity != null && params.quantity !== '') updates.RequestedQty = Number(params.quantity) || 0;
+    if (params.unit != null) updates.Unit = String(params.unit).trim();
+    if (params.notes != null) updates.Notes = String(params.notes).trim();
+    if (params.productName != null && String(params.productName).trim()) updates.ProductName = String(params.productName).trim();
+    if (params.managerEmail != null) updates.ManagerEmail = String(params.managerEmail).toLowerCase().trim();
+    if (Object.keys(updates).length === 0) return fail(new Error('Nothing to update'));
+    updates.UpdatedAt = new Date().toISOString();
+    await ref.update(updates);
+    await auditLog('requisition_edit', email, { requestId: id, fields: Object.keys(updates).join(', ') });
+    return ok({ message: 'Request updated' });
+  }
+
   async function adminOverride(params) {
     var id = params.id;
     var status = params.status;
@@ -2078,6 +2124,8 @@
     wip_action_req: wipActionRequisition,
     edit_request_item: editRequestItem,
     delete_request_item: deleteRequestItem,
+    edit_request: editRequest,
+    delete_request: deleteRequest,
     admin_override: adminOverride,
     admin_force_action: adminForceAction,
     submit_stock_adjustment_request: async function (p) {
