@@ -1270,7 +1270,7 @@
     var actorEmail = (params.email || '').toLowerCase().trim();
     var actorName = (params.user || params.name || actorEmail || '').toString().trim();
     if (!actorEmail) return fail(new Error('Email required'));
-    if (!(newQty > 0)) return fail(new Error('Valid newQuantity required'));
+    if (!(newQty >= 0)) return fail(new Error('Valid newQuantity required'));
     if (!reason) return fail(new Error('Reason required'));
     if (!sourceTxId) return fail(new Error('sourceTxId required'));
 
@@ -1337,6 +1337,7 @@
     // Stock adjustments must use transaction types that Main Inventory stock engine understands.
     // - Increase dispatch => add another dispatch transaction (positive qty)
     // - Reduce dispatch => add a stock-take-adj-in transaction (positive qty) to return stock
+    // - Set qty to 0 => treated as "void/cancel": return full quantity (stock-take-adj-in) and UI will show effective qty = 0
     if (delta > 0) {
       transactions.push({
         id: Date.now(),
@@ -1362,7 +1363,7 @@
         unit: src.unit || '',
         category: 'finishedGoods',
         type: 'stock-take-adj-in',
-        subtype: 'Dispatch Revert',
+        subtype: (newQty === 0 ? 'Dispatch Void' : 'Dispatch Revert'),
         quantity: (-delta),
         date: dateStr,
         source: 'digital_requisition',
@@ -2483,22 +2484,62 @@
         var payload0 = (d0 && d0.data) ? d0.data : d0;
         var txs = (payload0 && payload0.transactions) ? payload0.transactions : [];
         if (Array.isArray(txs) && txs.length) {
-          var standalone = txs.filter(function (t) {
-            if (!t) return false;
-            if (String(t.type || '').toLowerCase() !== 'dispatch') return false;
-            if (String(t.source || '').toLowerCase() !== 'digital_requisition') return false;
+          // Build standalone dispatch list with edits/reverts applied (effective quantity).
+          var owned = function (t) {
             var byEmail = String(t.dispatchedByEmail || '').toLowerCase().trim();
             var byName = String(t.dispatchedBy || '').toLowerCase().trim();
             return (byEmail && byEmail === email) || (byName && name && byName === name) || (byName && byName === email);
-          }).map(function (t) {
+          };
+
+          var base = txs.filter(function (t) {
+            if (!t) return false;
+            if (String(t.type || '').toLowerCase() !== 'dispatch') return false;
+            if (String(t.source || '').toLowerCase() !== 'digital_requisition') return false;
+            // base dispatch has no originalDispatchTxId
+            if (t.originalDispatchTxId != null && t.originalDispatchTxId !== '') return false;
+            return owned(t);
+          });
+
+          var related = txs.filter(function (t) {
+            if (!t) return false;
+            if (String(t.source || '').toLowerCase() !== 'digital_requisition') return false;
+            if (!owned(t)) return false;
+            // related transactions reference originalDispatchTxId
+            return (t.originalDispatchTxId != null && t.originalDispatchTxId !== '');
+          });
+
+          var relatedByOrig = {};
+          related.forEach(function (t) {
+            var k = String(t.originalDispatchTxId);
+            if (!relatedByOrig[k]) relatedByOrig[k] = [];
+            relatedByOrig[k].push(t);
+          });
+
+          var standalone = base.map(function (t) {
+            var origId = String(t.id || '');
+            var baseQty = Math.abs(parseFloat(t.quantity || 0) || 0);
+            var eff = baseQty;
+            var isVoided = false;
+            var rel = relatedByOrig[origId] || [];
+            rel.forEach(function (rt) {
+              var typ = String(rt.type || '').toLowerCase();
+              var sub = String(rt.subtype || '').toLowerCase();
+              var q = Math.abs(parseFloat(rt.quantity || 0) || 0);
+              if (typ === 'dispatch') eff += q; // edit increase
+              else if (typ === 'stock-take-adj-in') {
+                eff = Math.max(0, eff - q); // return stock reduces effective dispatch
+                if (sub.indexOf('void') >= 0) isVoided = true;
+              }
+            });
+            if (isVoided) eff = 0;
             return {
               DispatchID: 'STD-' + String(t.id || Date.now()),
               SourceTxId: t.id || '',
               RequestID: '',
               ProductName: t.itemName || t.productName || '',
-              Quantity: Math.abs(parseFloat(t.quantity || 0) || 0),
+              Quantity: eff,
               Unit: t.unit || '',
-              Status: 'APPROVED',
+              Status: (eff === 0 ? 'CANCELLED' : 'APPROVED'),
               RequestedBy: t.dispatchedBy || '',
               RequestedByEmail: t.dispatchedByEmail || '',
               RequesterEmail: '',
