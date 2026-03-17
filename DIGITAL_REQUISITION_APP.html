@@ -2389,7 +2389,7 @@
                 </div>
             `;
             try {
-                const data = await callBackend('get_my_dispatches', { email: (currentUser && currentUser.email) || '' });
+                const data = await callBackend('get_my_dispatches', { email: (currentUser && currentUser.email) || '', name: (currentUser && currentUser.name) || '' });
                 const list = data.dispatches || data.data || [];
                 const el = document.getElementById('myDispatchesList');
                 if (!el) return;
