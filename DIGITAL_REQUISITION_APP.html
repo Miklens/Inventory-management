@@ -1307,7 +1307,11 @@
 
             try {
                 const data = await callBackend('get_my_requests', { email: currentUser.email, light: '1' });
-                console.log('[MyRequests] get_my_requests response', { build: window.__REQ_APP_BUILD__, email: currentUser.email }, data);
+                try {
+                    console.log('[MyRequests] get_my_requests response (json)', JSON.stringify({ meta: { build: window.__REQ_APP_BUILD__, email: currentUser.email }, data: data }));
+                } catch (e) {
+                    console.log('[MyRequests] get_my_requests response', { build: window.__REQ_APP_BUILD__, email: currentUser.email }, data);
+                }
 
                 if (data.requests && data.requests.length > 0) {
                     data.requests.sort(function (a, b) {
@@ -2512,7 +2516,11 @@
                 if (extraParams && typeof extraParams === 'object') Object.assign(params, extraParams);
                 const data = await callBackend('get_requests_by_stage', params);
                 if (stage === 'ISSUED_HISTORY' && params.requesterEmail) {
-                    console.log('[MyHistory] ISSUED_HISTORY response', { build: window.__REQ_APP_BUILD__, requesterEmail: params.requesterEmail }, data);
+                    try {
+                        console.log('[MyHistory] ISSUED_HISTORY response (json)', JSON.stringify({ meta: { build: window.__REQ_APP_BUILD__, requesterEmail: params.requesterEmail }, data: data }));
+                    } catch (e) {
+                        console.log('[MyHistory] ISSUED_HISTORY response', { build: window.__REQ_APP_BUILD__, requesterEmail: params.requesterEmail }, data);
+                    }
                 }
 
                 // Remove existing "Load More" button if any
