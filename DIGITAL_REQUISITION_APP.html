@@ -505,8 +505,15 @@
             // In Firebase mode, backend role checks work best with UID because Users docs are keyed by UID.
             // Safe no-op for Apps Script mode.
             params = params || {};
-            if (USE_FIREBASE && currentUser && currentUser.uid) {
-                if (!params.adminUid && !params.uid) params.adminUid = currentUser.uid;
+            if (USE_FIREBASE) {
+                // Hydrate UID lazily (saved sessions may miss uid; Firebase auth may become ready after onload).
+                if (currentUser && !currentUser.uid && window.firebase && firebase.auth) {
+                    const au = firebase.auth().currentUser;
+                    if (au && au.uid) currentUser.uid = au.uid;
+                }
+                if (currentUser && currentUser.uid) {
+                    if (!params.adminUid && !params.uid) params.adminUid = currentUser.uid;
+                }
             }
             return params;
         }
