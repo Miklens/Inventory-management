@@ -10157,48 +10157,37 @@
                         }
 
                         try {
-                            const backupData = JSON.stringify(appState);
-                            const payload = {
-                                action: 'auto_backup_email',
-                                secret: 'MiklensEmailSecret2024XyZ789',
-                                data: backupData
-                            };
-
-                            const response = await fetch(appState.cloudApiUrl, {
-                                method: 'POST',
-                                mode: 'no-cors', // GAS Web Apps often require no-cors or redirect handling
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(payload)
-                            });
-
-                            // Update last backup timestamp
-                            appState.lastAutoBackup = Date.now();
-
+                            const backupPayload = JSON.stringify(appState);
+                            
                             updateSyncStatus('syncing', isManual ? 'Sending manual email backup...' : 'Triggering scheduled auto-backup...');
 
                             let result;
                             if (useFirebase && window.FirebaseBackend) {
-                                // For Firebase, we might need a specific cloud function or just log it
-                                // For now, we'll assume the same action pattern if possible, or skip if not supported
                                 result = await window.FirebaseBackend.callBackend('auto_backup_email', {
-                                    data: JSON.stringify(backupPayload)
+                                    secret: 'MiklensEmailSecret2024XyZ789',
+                                    data: backupPayload
                                 });
                             } else {
-                                const params = new URLSearchParams();
-                                params.append('action', 'auto_backup_email');
-                                // Send full data in body, action in query
-                                const response = await fetch(`${cloudApiUrl}?action=auto_backup_email`, {
+                                // For GAS, send as application/x-www-form-urlencoded to avoid CORS preflight (simple request)
+                                const bodyParams = new URLSearchParams();
+                                bodyParams.append('action', 'auto_backup_email');
+                                bodyParams.append('secret', 'MiklensEmailSecret2024XyZ789');
+                                bodyParams.append('data', backupPayload);
+
+                                await fetch(cloudApiUrl, {
                                     method: 'POST',
                                     mode: 'no-cors',
                                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                    body: new URLSearchParams({ 
-                                        secret: 'MiklensEmailSecret2024XyZ789',
-                                        data: JSON.stringify(backupPayload) 
-                                    })
+                                    body: bodyParams
                                 });
-                                // no-cors means we can't read the response, but we assume success if no throw
+                                // no-cors means we can't read the response, but if fetch doesn't throw, 
+                                // it means the request was sent toward the server.
                                 result = { result: 'success' };
                             }
+
+                            // Update last backup timestamp on success
+                            appState.lastAutoBackup = Date.now();
+                            saveState();
 
                             if (isManual) showAlert("Manual backup request sent to Admin/Manager via Email!");
                             showToast(isManual ? "Manual Email Backup Sent" : "Scheduled Auto-Backup Sent", "success");
