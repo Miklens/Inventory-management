@@ -2708,10 +2708,13 @@
                         });
 
                         transactionsBeforeTarget.forEach(tx => {
+                            const q = (typeof tx.quantity === 'number') ? tx.quantity : parseFloat(tx.quantity || 0) || 0;
                             if (tx.type === 'receive' || tx.type === 'stock-take-adj-in' || tx.type === 'production-add') {
-                                openingStock += tx.quantity;
+                                openingStock += q;
                             } else if (tx.type === 'consume' || tx.type === 'stock-take-adj-out' || tx.type === 'production-consume' || tx.type === 'requisition-issue' || tx.type === 'dispatch') {
-                                openingStock -= tx.quantity;
+                                // Safety: older integrations sometimes saved negative quantities for consume/dispatch.
+                                // Always treat these as an OUTFLOW.
+                                openingStock -= (q > 0 ? q : -q);
                             }
                         });
 
