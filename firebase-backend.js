@@ -1298,6 +1298,7 @@
         if (status === 'RESEARCH_ISSUED') return true;
         // Back-compat: older research issues were saved as ISSUED + "Material Issued / WIP"
         if (typ.indexOf('RESEARCH') >= 0 && status === 'ISSUED') return true;
+        if (status === 'DISPATCHED' || status === 'PRODUCED') return true;
         if (cur.indexOf('COMPLETED') >= 0 || status === 'COMPLETED') return true;
         if (status === 'ISSUED' && (cur.indexOf('WIP') < 0 && cur.indexOf('MANUFACTURING') < 0 && cur.indexOf('MATERIAL ISSUED') < 0)) return true;
         return false;
@@ -1857,7 +1858,15 @@
   async function getMyRequests(params) {
     var email = (params.email || '').toLowerCase().trim();
     var all = await getCollectionArray('Requisitions_V2');
-    var mine = all.filter(function (r) { return (r.EmployeeEm || r.requesterEmail || '').toLowerCase().trim() === email; });
+    // Back-compat: older records may exist in legacy collection name.
+    try {
+      var legacy = await getCollectionArray('Requisitions');
+      if (Array.isArray(legacy) && legacy.length) all = all.concat(legacy);
+    } catch (e) {}
+    var mine = all.filter(function (r) {
+      var re = (r.EmployeeEm || r.requesterEmail || r.EmployeeEmail || r.email || '').toLowerCase().trim();
+      return re === email;
+    });
     var light = params.light === '1' || params.light === true;
     var requests = mine.map(function (d) { return rowToRequest(d, light); });
     return ok({ requests: requests });
@@ -2251,12 +2260,14 @@
 
   async function getMyDispatches(params) {
     var email = (params.email || params.requestedByEmail || '').toLowerCase().trim();
+    var name = (params.name || params.requestedByName || '').toLowerCase().trim();
     if (!email) return fail(new Error('Email required'));
     var all = await getCollectionArray('RequisitionDispatches');
     var mine = all.filter(function (d) {
       var e = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
       var by = (d.RequestedBy || d.requestedBy || '').toLowerCase().trim();
-      return (e && e === email) || (by && by === email);
+      // Legacy dispatches may store only name (RequestedBy) without email.
+      return (e && e === email) || (by && (by === email || (name && by === name)));
     });
     // newest first
     mine.sort(function (a, b) {
