@@ -14,10 +14,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260317_8"></script>
+    <script src="firebase-backend.js?v=20260317_10"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-      window.__REQ_APP_BUILD__ = '2026-03-17_8';
+      window.__REQ_APP_BUILD__ = '2026-03-17_10';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
@@ -4238,6 +4238,7 @@
                             customerId: customerId || undefined,
                             newCustomerName: newCustomerName || undefined,
                             user: currentUser?.name || currentUser?.email || 'User',
+                            email: (currentUser && currentUser.email) ? currentUser.email : '',
                             remarks
                         });
                         if (res.result === 'success') {
