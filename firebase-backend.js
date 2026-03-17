@@ -1222,6 +1222,13 @@
       var status = (r.Status || r.status || '').toUpperCase();
       var cur = (r.CurrentStage || r.currentStage || r.stage || '').toUpperCase();
       if (st === 'ALL') return true;
+      if (st === 'ISSUED_HISTORY') {
+        // Issued history: include research issued and any completed/closed items (exclude partial).
+        if (status === 'RESEARCH_ISSUED') return true;
+        if (cur.indexOf('COMPLETED') >= 0 || status === 'COMPLETED') return true;
+        if (status === 'ISSUED' && (cur.indexOf('WIP') < 0 && cur.indexOf('MANUFACTURING') < 0 && cur.indexOf('MATERIAL ISSUED') < 0)) return true;
+        return false;
+      }
       if (st === 'PENDING_APPROVALS') {
         if (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) return true;
         if (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0) return true;
@@ -1539,8 +1546,8 @@
         if (deductResultR.result !== 'success') {
           return deductResultR;
         }
-        updates.Status = 'ISSUED';
-        updates.CurrentStage = 'Material Issued / WIP';
+        updates.Status = 'RESEARCH_ISSUED';
+        updates.CurrentStage = 'Research Materials Issued';
         updates.IssuedAt = new Date().toISOString();
         var resRefR = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
         var resSnapR = await resRefR.get();
