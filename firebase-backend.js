@@ -2206,6 +2206,7 @@
     var qty = parseFloat(params.quantity || params.qty || 0);
     var unit = params.unit || '';
     var requestedBy = params.user || 'Store';
+    var requestedByEmail = (params.email || params.requestedByEmail || '').toString().trim();
     var remarks = params.remarks || '';
     if (!requestId || !productName || qty <= 0) return fail(new Error('Request ID, product name and quantity required'));
     var reqRef = db.collection('Requisitions_V2').doc(String(requestId).replace(/\//g, '_'));
@@ -2226,6 +2227,7 @@
       Unit: unit || reqData.Unit || '',
       Status: 'PENDING_APPROVAL',
       RequestedBy: requestedBy,
+      RequestedByEmail: requestedByEmail || '',
       RequestedAt: new Date().toISOString(),
       ApprovedBy: '',
       ApprovedAt: null,
@@ -2245,6 +2247,81 @@
       directFromStock: isDirectFromStock
     });
     return ok({ dispatchId: dispatchId, message: 'Dispatch request submitted for manager approval' });
+  }
+
+  async function getMyDispatches(params) {
+    var email = (params.email || params.requestedByEmail || '').toLowerCase().trim();
+    if (!email) return fail(new Error('Email required'));
+    var all = await getCollectionArray('RequisitionDispatches');
+    var mine = all.filter(function (d) {
+      var e = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
+      var by = (d.RequestedBy || d.requestedBy || '').toLowerCase().trim();
+      return (e && e === email) || (by && by === email);
+    });
+    // newest first
+    mine.sort(function (a, b) {
+      var ta = (a.RequestedAt || a.requestedAt || '').toString();
+      var tb = (b.RequestedAt || b.requestedAt || '').toString();
+      return ta > tb ? -1 : ta < tb ? 1 : 0;
+    });
+    return ok({ dispatches: mine });
+  }
+
+  async function editDispatch(params) {
+    var dispatchId = params.dispatchId || params.id;
+    if (!dispatchId) return fail(new Error('Dispatch ID required'));
+    var qty = params.quantity != null ? parseFloat(params.quantity) : NaN;
+    var remarks = (params.remarks || '').toString();
+    if (!(qty > 0)) return fail(new Error('Valid quantity required'));
+    var actorEmail = (params.email || '').toLowerCase().trim();
+    var actorId = adminIdentifier(params) || actorEmail;
+    if (!actorId) return fail(new Error('Not signed in'));
+
+    var docRef = db.collection('RequisitionDispatches').doc(String(dispatchId).replace(/\//g, '_'));
+    var snap = await docRef.get();
+    if (!snap.exists) return fail(new Error('Dispatch not found'));
+    var d = snap.data() || {};
+    var status = String(d.Status || d.status || '').toUpperCase();
+    if (!(status === 'PENDING_APPROVAL' || status === 'PENDING')) return fail(new Error('Only pending dispatch can be edited'));
+
+    var isAdmin = await hasRoleAny([actorId, actorEmail], ['Manager', 'Admin']);
+    var ownerEmail = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
+    if (!isAdmin && (!ownerEmail || ownerEmail !== actorEmail)) return fail(new Error('You can edit only your own dispatch requests'));
+
+    await docRef.update({
+      Quantity: qty,
+      Remarks: remarks,
+      UpdatedAt: new Date().toISOString(),
+      UpdatedBy: params.user || actorEmail || ''
+    });
+    return ok({ message: 'Dispatch updated' });
+  }
+
+  async function cancelDispatch(params) {
+    var dispatchId = params.dispatchId || params.id;
+    if (!dispatchId) return fail(new Error('Dispatch ID required'));
+    var actorEmail = (params.email || '').toLowerCase().trim();
+    var actorId = adminIdentifier(params) || actorEmail;
+    if (!actorId) return fail(new Error('Not signed in'));
+
+    var docRef = db.collection('RequisitionDispatches').doc(String(dispatchId).replace(/\//g, '_'));
+    var snap = await docRef.get();
+    if (!snap.exists) return fail(new Error('Dispatch not found'));
+    var d = snap.data() || {};
+    var status = String(d.Status || d.status || '').toUpperCase();
+    if (status === 'APPROVED') return fail(new Error('Approved dispatch cannot be cancelled'));
+    if (status === 'CANCELLED') return ok({ message: 'Already cancelled' });
+
+    var isAdmin = await hasRoleAny([actorId, actorEmail], ['Manager', 'Admin']);
+    var ownerEmail = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
+    if (!isAdmin && (!ownerEmail || ownerEmail !== actorEmail)) return fail(new Error('You can cancel only your own dispatch requests'));
+
+    await docRef.update({
+      Status: 'CANCELLED',
+      CancelledAt: new Date().toISOString(),
+      CancelledBy: params.user || actorEmail || ''
+    });
+    return ok({ message: 'Dispatch cancelled' });
   }
 
   async function approveDispatch(params) {
@@ -2695,6 +2772,7 @@
     get_stock_adjustment_requests: getStockAdjustmentRequests,
     get_pending_dispatch_approvals: getPendingDispatchApprovals,
     get_dispatches_for_request: getDispatchesForRequest,
+    get_my_dispatches: getMyDispatches,
     submit_request: submitRequest,
     create_request: submitRequest,
     update_request_stage: updateRequestStage,
@@ -2712,6 +2790,8 @@
       return ok({ message: 'Recorded (Firebase)', remaining: 0 });
     },
     request_dispatch: requestDispatch,
+    edit_dispatch: editDispatch,
+    cancel_dispatch: cancelDispatch,
     approve_dispatch: approveDispatch,
     get_inventory_for_standalone_dispatch: getInventoryForStandaloneDispatch,
     standalone_dispatch_from_stock: standaloneDispatchFromStock,
