@@ -3065,6 +3065,7 @@
             const hasLocalChanges = Object.keys(localCorrections).length > 0;
             const userRole = normalizeRole(currentUser.role);
             const stage = (req.currentStage || '').toUpperCase();
+            const isResearchReq = ((req.type || '') + '').toLowerCase().indexOf('research') >= 0;
 
             console.log(`[ActionButtons] Role: ${userRole}, Stage: ${stage}, Status: ${req.status}`);
 
@@ -3095,6 +3096,15 @@
                 } else {
                     actionBtns = `<button onclick="confirmFormula('${req.id}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">Confirm & Start Production</button>`;
                 }
+            } else if (isResearchReq && (req.status === 'RESEARCH_ISSUED' || (req.status === 'ISSUED' && stage.indexOf('MATERIAL ISSUED') >= 0) || stage.indexOf('RESEARCH MATERIALS ISSUED') >= 0 || stage.includes('WIP'))) {
+                // Research is NOT a production batch: hide Pause/Complete/Cancel. Allow Undo Issue.
+                const canUndo = (userRole === 'Store Incharge' || userRole === 'Manager' || userRole === 'Admin');
+                actionBtns = `
+                    <div class="w-full">
+                        <p class="w-full text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">🔬 Research issue deducted from inventory. WIP actions are disabled for Research.</p>
+                        ${canUndo ? `<button type="button" onclick="undoResearchIssue(event, '${req.id}')" class="w-full bg-gray-800 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-black transition-all">↩️ Undo Issue (Restore Stock)</button>` : `<div class="w-full text-center py-2 bg-gray-50 rounded-lg text-gray-400 text-[10px] font-black uppercase tracking-widest">View only</div>`}
+                    </div>
+                `;
             } else if (stage === 'WIP' || stage.includes('WIP') || stage === 'PRODUCTION PAUSED') {
                 const isRequester = (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim());
                 const isStore = (userRole === 'Store Incharge');
@@ -3179,6 +3189,29 @@
             }
 
             if (actionsArea) actionsArea.innerHTML = actionBtns;
+        }
+
+        async function undoResearchIssue(ev, reqId) {
+            if (ev) ev.stopPropagation();
+            if (!reqId) return;
+            const ok = confirm('Undo this Research issue?\n\nThis will restore deducted stock in Main Inventory and move the request back to Pending.');
+            if (!ok) return;
+            showToast('Undoing issue...', 'info');
+            try {
+                const data = await callBackendPost('update_request_stage', { id: reqId, stageAction: 'UNDO_ISSUE', user: currentUser.name, email: currentUser.email });
+                console.log('[undoResearchIssue] response', data);
+                if (data.result === 'success') {
+                    invalidateViewCache(true);
+                    showToast('Undo successful. Stock restored.', 'success');
+                    closeDetails();
+                    initializePortal(currentUser.role);
+                } else {
+                    showToast(userFriendlyError(data.error), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showToast(CRITICAL_ACTION_RETRY_MSG, 'warning');
+            }
         }
 
         function openCorrectionForm(id, itemName = '', oldQty = '') {
