@@ -1504,11 +1504,13 @@
     var stageAction = (params.stageAction || '').toUpperCase();
     if (stageAction === 'ISSUE' || stageAction === 'PARTIAL_ISSUE') {
       var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
-      var allowed = await hasRole(actorId, ['Store Incharge', 'Store', 'Manager', 'Admin']);
+      var actorEmail = (params.email || '').toLowerCase().trim();
+      var allowed = await hasRoleAny([actorId, actorEmail], ['Store Incharge', 'Store', 'Manager', 'Admin']);
       if (!allowed) return fail(new Error('Only Store Incharge, Manager, or Admin can issue or partially issue materials'));
     } else if (stageAction === 'RECORD') {
       var recordActorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
-      var recordAllowed = await hasRole(recordActorId, ['Manager', 'Admin']);
+      var recordActorEmail = (params.email || '').toLowerCase().trim();
+      var recordAllowed = await hasRoleAny([recordActorId, recordActorEmail], ['Manager', 'Admin']);
       if (!recordAllowed) return fail(new Error('Only Manager or Admin can record production'));
     }
     var docRef = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
@@ -1820,6 +1822,16 @@
     var role = (await getUserRole(identifier) || '').toLowerCase();
     var allowed = (allowedRoles || []).map(function (x) { return String(x).toLowerCase(); });
     return allowed.some(function (a) { return role.indexOf(a) >= 0; });
+  }
+
+  async function hasRoleAny(identifiers, allowedRoles) {
+    var ids = (identifiers || []).filter(Boolean);
+    for (var i = 0; i < ids.length; i++) {
+      try {
+        if (await hasRole(ids[i], allowedRoles)) return true;
+      } catch (e) { /* ignore */ }
+    }
+    return false;
   }
 
   function adminIdentifier(params) {
