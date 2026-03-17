@@ -3692,8 +3692,8 @@
                     // ============================
                     // AI INSIGHTS – CONFIG & HELPERS
                     // ============================
-                    const AI_LOCAL_STORAGE_KEY = 'MIKLENS_AI_CONFIG_V2'; // Bump version to force some defaults, but we still repair old one
-                    const AI_CALL_COOLDOWN_MS = 10000;
+                    const AI_LOCAL_STORAGE_KEY = 'MIKLENS_AI_CONFIG_V2';
+                    const AI_CALL_COOLDOWN_MS = 15000;
                     window._lastAiCallTime = 0;
                     window._aiRequestInFlight = false;
 
@@ -3707,22 +3707,42 @@
                             const defaults = getDefaultAiConfig();
                             
                             // 1) FORCE REPAIR: Iterate and fix stale Gemini IDs in saved config
+                            let repaired = false;
                             if (config.providers && config.providers.gemini) {
                                 const gem = config.providers.gemini;
                                 if (gem.models) {
                                     gem.models.forEach(m => {
-                                        if (m.id && m.id.includes('2.5')) m.id = m.id.replace('2.5', '2.0');
-                                        if (m.apiModel && m.apiModel.includes('2.5')) m.apiModel = m.apiModel.replace('2.5', '2.0');
-                                        if (m.name && m.name.includes('2.5')) m.name = m.name.replace('2.5', '2.0');
+                                        const oldId = m.id;
+                                        // Fix 2.0 or 1.5 artifacts to 2.5 or 3.1
+                                        if (m.id && (m.id.includes('2.0') || m.id.includes('1.5'))) {
+                                            if (m.id.includes('pro')) m.id = 'gemini-2.5-pro';
+                                            else m.id = 'gemini-2.5-flash';
+                                            repaired = true;
+                                        }
+                                        if (m.apiModel && (m.apiModel.includes('2.0') || m.apiModel.includes('1.5'))) {
+                                            if (m.apiModel.includes('pro')) m.apiModel = 'gemini-2.5-pro';
+                                            else m.apiModel = 'gemini-2.5-flash';
+                                            repaired = true;
+                                        }
+                                        if (m.name && (m.name.includes('2.0') || m.name.includes('1.5'))) {
+                                            m.name = m.name.replace('2.0', '2.5').replace('1.5', '2.5');
+                                            repaired = true;
+                                        }
                                     });
                                 }
                                 if (gem.modelFallbackOrder) {
-                                    gem.modelFallbackOrder = gem.modelFallbackOrder.map(id => id.replace('2.5', '2.0'));
+                                    const oldOrder = JSON.stringify(gem.modelFallbackOrder);
+                                    gem.modelFallbackOrder = defaults.providers.gemini.modelFallbackOrder;
+                                    if (oldOrder !== JSON.stringify(gem.modelFallbackOrder)) repaired = true;
                                 }
                             }
                             
-                            // Merge with defaults to ensure any new models are present
-                            return Object.assign(defaults, config);
+                            const finalConfig = Object.assign(defaults, config);
+                            if (repaired) {
+                                window._aiConfig = finalConfig;
+                                saveAiConfig(); // PERSIST THE REPAIR
+                            }
+                            return finalConfig;
                         } catch (e) {
                             console.warn('AI config load failed, using defaults', e);
                             return getDefaultAiConfig();
@@ -3742,13 +3762,14 @@
                             providers: {
                                 gemini: {
                                     models: [
-                                        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', apiModel: 'gemini-1.5-flash', enabled: true, keys: [], lastKeyIndex: 0 },
-                                        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', apiModel: 'gemini-1.5-pro', enabled: true, keys: [], lastKeyIndex: 0 },
-                                        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', apiModel: 'gemini-2.0-flash', enabled: true, keys: [], lastKeyIndex: 0 },
-                                        { id: 'gemini-2.0-pro', name: 'Gemini 2.0 Pro', apiModel: 'gemini-2.0-pro', enabled: true, keys: [], lastKeyIndex: 0 }
+                                        { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', apiModel: 'gemini-3.1-pro', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-3-flash', name: 'Gemini 3 Flash', apiModel: 'gemini-3-flash', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', apiModel: 'gemini-3.1-flash-lite', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', apiModel: 'gemini-2.5-pro', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', apiModel: 'gemini-2.5-flash', enabled: true, keys: [], lastKeyIndex: 0 }
                                     ],
-                                    modelFallbackOrder: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-2.0-pro'],
-                                    preferredModel: 'gemini-1.5-flash'
+                                    modelFallbackOrder: ['gemini-3.1-pro', 'gemini-3-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+                                    preferredModel: 'gemini-3-flash'
                                 },
                                 groq: {
                                     models: [
@@ -3784,7 +3805,7 @@
                     async function callGeminiModel(model, apiKey, promptText) {
                         // Use the same style as Herbicide app: v1/models/{model}:generateContent
                         // Model IDs should be the official Gemini IDs (e.g. gemini-3.1-flash-lite-preview).
-                        const modelId = model.apiModel || 'gemini-1.5-flash-latest';
+                        const modelId = model.apiModel || 'gemini-3-flash';
                         const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
                         const body = {
                             contents: [{ role: 'user', parts: [{ text: promptText }] }],
