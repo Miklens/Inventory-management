@@ -918,7 +918,8 @@
           itemName: ent.itemName || ent.itemId,
           category: cat,
           type: 'requisition-issue',
-          quantity: -deducted,
+          // Main Inventory expects consume/issue quantities to be positive (it subtracts tx.quantity).
+          quantity: deducted,
           date: dateStr,
           requestId: requestId
         });
@@ -987,7 +988,10 @@
           itemId: ent.itemId || ent.itemName,
           itemName: ent.itemName || ent.itemId,
           category: cat,
-          type: 'requisition-issue-undo',
+          // Main Inventory stock engine does NOT know "requisition-issue-undo".
+          // Use an existing stock-add type so Undo is reflected after Sync.
+          type: 'stock-take-adj-in',
+          subtype: 'Requisition Undo',
           quantity: restored,
           date: dateStr,
           requestId: requestId
@@ -1025,10 +1029,12 @@
 
     var nameStr = (productName || '').toString().trim();
     var remaining = qty;
+    var matchedItem = null;
     for (var i = 0; i < arr.length && remaining > 0; i++) {
       var item = arr[i];
       var match = nameStr && (String(item.name || '') === nameStr || String(item.itemName || '') === nameStr || String(item.id || '') === nameStr);
       if (!match) continue;
+      if (!matchedItem) matchedItem = item;
       var current = parseFloat(item.quantity || item.qty || 0) || 0;
       var deduct = Math.min(remaining, current);
       item.quantity = item.qty = Math.max(0, current - deduct);
@@ -1043,13 +1049,19 @@
     var nowIso = new Date().toISOString();
     var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
     if (!Array.isArray(payload.transactions)) payload.transactions = [];
+    var itemId = matchedItem ? matchedItem.id : null;
+    var itemName = matchedItem ? (matchedItem.name || matchedItem.itemName || nameStr) : nameStr;
+    var itemUnit = matchedItem ? (matchedItem.unit || unit || '') : (unit || '');
+    if (itemId == null || itemId === '') itemId = (itemName || nameStr);
     payload.transactions.push({
       id: Date.now().toString() + '-disp',
-      itemId: productName,
-      itemName: productName,
+      itemId: itemId,
+      itemName: itemName,
+      unit: itemUnit,
       category: 'finishedGoods',
       type: 'dispatch',
-      quantity: -qty,
+      // Main Inventory expects dispatch quantities to be positive (it subtracts tx.quantity).
+      quantity: qty,
       date: dateStr,
       requestId: requestId || '',
       dispatchId: dispatchId
@@ -1184,7 +1196,9 @@
     if (!matchedItem) return fail(new Error('Product not found: ' + itemName));
     var availableStock = calculateFGStock(matchedItem, transactions);
     if (availableStock < qty) return fail(new Error('Insufficient stock for ' + itemName + '. Available: ' + availableStock.toFixed(3) + ', requested: ' + qty + ' ' + itemUnit));
-    itemId = matchedItem.id;
+    // Important: Main Inventory matches transactions by (category, itemId).
+    // Some datasets use missing/blank ids, so fall back to name to keep the link stable.
+    itemId = (matchedItem.id != null && matchedItem.id !== '') ? matchedItem.id : (matchedItem.name || matchedItem.itemName || String(matchedItem.id || '')).toString().trim();
     itemName = (matchedItem.name || matchedItem.itemName || String(matchedItem.id || '')).toString().trim();
     itemUnit = (matchedItem.unit || 'Units').toString().trim();
 
@@ -1208,10 +1222,12 @@
       id: Date.now(),
       itemId: itemId,
       itemName: itemName,
+      unit: itemUnit,
       category: 'finishedGoods',
       type: 'dispatch',
       subtype: 'Sale',
-      quantity: -qty,
+      // Main Inventory expects DISPATCH quantity to be positive (it subtracts tx.quantity).
+      quantity: qty,
       date: dateStr,
       customerId: custId,
       customerName: custName,
@@ -1289,6 +1305,8 @@
       return fail(new Error('You can edit only your own direct dispatch'));
     }
 
+    // After 2026-03-17_9, dispatch transactions store positive quantities.
+    // Keep compatibility with older negative quantities.
     var oldQty = Math.abs(parseFloat(src.quantity || 0) || 0);
     var delta = newQty - oldQty;
     if (Math.abs(delta) < 1e-9) return ok({ message: 'No change' });
@@ -1316,20 +1334,44 @@
 
     var nowIso = new Date().toISOString();
     var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
-    transactions.push({
-      id: Date.now(),
-      itemId: src.itemId,
-      itemName: src.itemName,
-      category: 'finishedGoods',
-      type: 'dispatch_edit_adjustment',
-      quantity: -delta, // delta>0 means consume more => negative; delta<0 means return stock => positive
-      date: dateStr,
-      source: 'digital_requisition',
-      originalDispatchTxId: sourceTxId,
-      notes: 'Edit direct dispatch. Reason: ' + reason + (newRemarks ? ('. Remarks: ' + newRemarks) : ''),
-      editedBy: actorName,
-      editedByEmail: actorEmail
-    });
+    // Stock adjustments must use transaction types that Main Inventory stock engine understands.
+    // - Increase dispatch => add another dispatch transaction (positive qty)
+    // - Reduce dispatch => add a stock-take-adj-in transaction (positive qty) to return stock
+    if (delta > 0) {
+      transactions.push({
+        id: Date.now(),
+        itemId: src.itemId,
+        itemName: src.itemName,
+        unit: src.unit || '',
+        category: 'finishedGoods',
+        type: 'dispatch',
+        subtype: 'Edit Increase',
+        quantity: delta,
+        date: dateStr,
+        source: 'digital_requisition',
+        originalDispatchTxId: sourceTxId,
+        notes: 'Edit direct dispatch (increase). Reason: ' + reason + (newRemarks ? ('. Remarks: ' + newRemarks) : ''),
+        editedBy: actorName,
+        editedByEmail: actorEmail
+      });
+    } else {
+      transactions.push({
+        id: Date.now(),
+        itemId: src.itemId,
+        itemName: src.itemName,
+        unit: src.unit || '',
+        category: 'finishedGoods',
+        type: 'stock-take-adj-in',
+        subtype: 'Dispatch Revert',
+        quantity: (-delta),
+        date: dateStr,
+        source: 'digital_requisition',
+        originalDispatchTxId: sourceTxId,
+        notes: 'Edit direct dispatch (decrease/return). Reason: ' + reason + (newRemarks ? ('. Remarks: ' + newRemarks) : ''),
+        editedBy: actorName,
+        editedByEmail: actorEmail
+      });
+    }
     payload.transactions = transactions;
 
     var saveResult = await saveInventory(payload, currentVersion);
