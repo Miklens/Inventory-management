@@ -1221,10 +1221,13 @@
     var match = function (r, st) {
       var status = (r.Status || r.status || '').toUpperCase();
       var cur = (r.CurrentStage || r.currentStage || r.stage || '').toUpperCase();
+      var typ = String(r.Type || r.type || '').toUpperCase();
       if (st === 'ALL') return true;
       if (st === 'ISSUED_HISTORY') {
         // Issued history: include research issued and any completed/closed items (exclude partial).
         if (status === 'RESEARCH_ISSUED') return true;
+        // Back-compat: older research issues were saved as ISSUED + "Material Issued / WIP"
+        if (typ.indexOf('RESEARCH') >= 0 && status === 'ISSUED') return true;
         if (cur.indexOf('COMPLETED') >= 0 || status === 'COMPLETED') return true;
         if (status === 'ISSUED' && (cur.indexOf('WIP') < 0 && cur.indexOf('MANUFACTURING') < 0 && cur.indexOf('MATERIAL ISSUED') < 0)) return true;
         return false;
@@ -1240,7 +1243,12 @@
         if ((status === 'APPROVED' || status === 'APPROVE_REQUEST') && (cur.indexOf('AWAITING') >= 0 || cur.indexOf('MATERIAL ISSUE') >= 0)) return true;
         if (status === 'PARTIALLY_ISSUED') return true;
       }
-      if (st === 'WIP' && (cur.indexOf('MANUFACTURING') >= 0 || cur.indexOf('WIP') >= 0 || cur.indexOf('MATERIAL ISSUED') >= 0 || cur === 'PAUSED')) return true;
+      if (st === 'WIP') {
+        // Research requests should not be tracked in WIP. (They are direct-issue + history.)
+        if (typ.indexOf('RESEARCH') >= 0) return false;
+        if (cur.indexOf('MANUFACTURING') >= 0 || cur.indexOf('WIP') >= 0 || cur.indexOf('MATERIAL ISSUED') >= 0 || cur === 'PAUSED') return true;
+        return false;
+      }
       if (st === 'DISPATCH' && (cur.indexOf('AWAITING DISPATCH') >= 0 || status === 'PRODUCED')) return true;
       if (st === 'PENDING_RECORD' && (cur.indexOf('AWAITING PRODUCTION RECORDING') >= 0 || cur.indexOf('MATERIAL ISSUED') >= 0)) return true;
       if (st === 'PARTIAL_ISSUE' && status === 'PARTIALLY_ISSUED') return true;
