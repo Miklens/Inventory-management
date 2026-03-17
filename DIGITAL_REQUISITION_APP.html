@@ -4677,13 +4677,23 @@
                 try {
                     currentUser = JSON.parse(savedUser);
                     currentUser.role = normalizeRole(currentUser.role); // NORMALIZE ON LOAD
-                    if (USE_FIREBASE && (!currentUser.uid) && window.firebase && firebase.auth) {
+                    if (USE_FIREBASE && window.firebase && firebase.auth) {
                         const au = firebase.auth().currentUser;
-                        if (au && au.uid) currentUser.uid = au.uid;
+                        // Important: localStorage user is NOT enough for Firestore reads. Require Firebase Auth session.
+                        if (!au) {
+                            localStorage.removeItem('miklens_user');
+                            currentUser = null;
+                            showToast('Session expired. Please log in again.', 'warning');
+                            // Stay on login screen
+                        } else {
+                            if (!currentUser.uid && au.uid) currentUser.uid = au.uid;
+                        }
                     }
                     localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
-                    showApp();
-                    startAutoRefresh();
+                    if (currentUser) {
+                        showApp();
+                        startAutoRefresh();
+                    }
                 } catch (e) {
                     localStorage.removeItem('miklens_user');
                 }
