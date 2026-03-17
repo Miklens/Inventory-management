@@ -1559,7 +1559,73 @@
       partialIssuedQty: r.PartialIssuedQty,
       thread: threads
     };
-    return ok({ request: request });
+
+    // Build a unified audit history timeline for UI.
+    // Format expected by UI: { action, user, timestamp, remarks }
+    var history = [];
+    function pushHist(action, user, ts, remarks) {
+      history.push({
+        action: String(action || ''),
+        user: String(user || ''),
+        timestamp: ts || new Date().toISOString(),
+        remarks: remarks != null ? String(remarks) : ''
+      });
+    }
+
+    // Created event
+    pushHist('REQUEST CREATED', request.requesterName || request.requesterEmail || 'User', request.date || new Date().toISOString(),
+      'Status: ' + (request.status || '') + ' | Stage: ' + (request.currentStage || ''));
+
+    // Thread notes (human-visible actions)
+    (threads || []).forEach(function (t) {
+      var who = t.User || t.user || t.Actor || t.role || '';
+      var act = t.Action || t.action || 'NOTE';
+      var ts = t.Timestamp || t.timestamp || '';
+      var msg = t.Remarks || t.remarks || t.Note || t.note || '';
+      pushHist(String(act).toUpperCase(), who, ts, msg);
+    });
+
+    // AuditLog entries (system + backend actions)
+    try {
+      var aSnap = await db.collection('AuditLog').where('details.requestId', '==', id).get();
+      aSnap.forEach(function (d) {
+        var a = d.data() || {};
+        var det = a.details || {};
+        var extra = [];
+        if (det.stageAction) extra.push('stageAction=' + det.stageAction);
+        if (det.newStatus) extra.push('newStatus=' + det.newStatus);
+        if (det.action) extra.push('action=' + det.action);
+        if (det.note) extra.push('note=' + det.note);
+        pushHist(String(a.action || 'AUDIT').toUpperCase(), a.user || 'system', a.timestamp, extra.join(' | '));
+      });
+    } catch (e) {
+      // ignore if rules block or missing index
+    }
+
+    // Dispatch events for this request
+    try {
+      var dispSnap = await db.collection('RequisitionDispatches').where('RequestID', '==', id).get();
+      dispSnap.forEach(function (d) {
+        var x = d.data() || {};
+        var did = x.DispatchID || x.dispatchId || d.id;
+        var qty = x.Quantity != null ? x.Quantity : x.quantity;
+        var unit = x.Unit || x.unit || '';
+        var st = x.Status || x.status || '';
+        var ts = x.ApprovedAt || x.approvedAt || x.RequestedAt || x.requestedAt || x.CreatedAt || x.createdAt || '';
+        var who = x.ApprovedBy || x.approvedBy || x.RequestedBy || x.requestedBy || '';
+        pushHist('DISPATCH ' + String(st || 'UPDATED').toUpperCase(), who, ts,
+          'DispatchID: ' + did + ' | Qty: ' + qty + ' ' + unit + (x.Remarks ? (' | ' + x.Remarks) : ''));
+      });
+    } catch (e) {}
+
+    // Sort oldest->newest for timeline rendering
+    history.sort(function (a, b) {
+      var ta = new Date(a.timestamp || 0).getTime();
+      var tb = new Date(b.timestamp || 0).getTime();
+      return ta - tb;
+    });
+
+    return ok({ request: request, history: history });
   }
 
   function buildFormDataFromInventory(inv) {
