@@ -17055,23 +17055,35 @@
                     window.calculateStock = function (item, category, targetDateStr) {
                         if (!item || !item.openingStockDate) return { openingStock: 0, received: 0, consumed: 0, closingStock: 0 };
 
+                        // Compatibility: some integrations stored tx.itemId as item NAME (not id),
+                        // and some stored negative quantities for outflows. Normalize both.
+                        function txMatchesItem(tx) {
+                            if (!tx || tx.category !== category) return false;
+                            const txId = (tx.itemId != null) ? String(tx.itemId) : '';
+                            const itemId = (item.id != null) ? String(item.id) : '';
+                            const itemName = (item.name != null) ? String(item.name) : '';
+                            return (txId !== '' && itemId !== '' && txId === itemId) || (txId !== '' && itemName !== '' && txId === itemName);
+                        }
+
                         const targetDate = getStartOfDay(targetDateStr);
                         const itemOpeningDate = getStartOfDay(item.openingStockDate);
 
                         // Filter txs on the exact date (local calendar day)
                         const transactionsOnTargetDate = appState.transactions.filter(tx =>
-                            tx.category === category && tx.itemId == item.id && getLocalDateString(tx.date) === targetDateStr
+                            txMatchesItem(tx) && getLocalDateString(tx.date) === targetDateStr
                         );
 
                         // ADDED 'sales-return' to RECEIVED list
                         const received = transactionsOnTargetDate
                             .filter(t => ['receive', 'stock-take-adj-in', 'production-add', 'sales-return'].includes(t.type))
-                            .reduce((sum, t) => sum + parseFloat(t.quantity || 0), 0);
+                            .reduce((sum, t) => sum + (parseFloat(t.quantity || 0) || 0), 0);
 
-                        // Consumed list remains same
                         const consumed = transactionsOnTargetDate
-                            .filter(t => ['consume', 'stock-take-adj-out', 'production-consume', 'dispatch'].includes(t.type))
-                            .reduce((sum, t) => sum + parseFloat(t.quantity || 0), 0);
+                            .filter(t => ['consume', 'stock-take-adj-out', 'production-consume', 'dispatch', 'requisition-issue'].includes(t.type))
+                            .reduce((sum, t) => {
+                                const q = parseFloat(t.quantity || 0) || 0;
+                                return sum + (q > 0 ? q : -q);
+                            }, 0);
 
                         if (targetDate < itemOpeningDate) {
                             return { openingStock: 0, received, consumed, closingStock: received - consumed };
@@ -17080,16 +17092,16 @@
                         let openingStock = parseFloat(item.openingStock || 0);
                         const transactionsBeforeTarget = appState.transactions.filter(tx => {
                             const txDate = getStartOfDay(tx.date);
-                            return tx.category === category && tx.itemId == item.id && txDate >= itemOpeningDate && txDate < targetDate;
+                            return txMatchesItem(tx) && txDate >= itemOpeningDate && txDate < targetDate;
                         });
 
                         transactionsBeforeTarget.forEach(tx => {
-                            const qty = parseFloat(tx.quantity || 0);
+                            const qty = parseFloat(tx.quantity || 0) || 0;
                             // ADDED 'sales-return' here too
                             if (['receive', 'stock-take-adj-in', 'production-add', 'sales-return'].includes(tx.type)) {
                                 openingStock += qty;
-                            } else if (['consume', 'stock-take-adj-out', 'production-consume', 'dispatch'].includes(tx.type)) {
-                                openingStock -= qty;
+                            } else if (['consume', 'stock-take-adj-out', 'production-consume', 'dispatch', 'requisition-issue'].includes(tx.type)) {
+                                openingStock -= (qty > 0 ? qty : -qty);
                             }
                         });
 
@@ -17112,7 +17124,16 @@
 
                         // Pre-fetch all relevant transactions sorted by date
                         const relevantTxs = appState.transactions
-                            .filter(t => t.category === category && t.itemId == item.id && getStartOfDay(t.date) >= startDate && getStartOfDay(t.date) <= endDate)
+                            .filter(t => {
+                                if (!t || t.category !== category) return false;
+                                const txId = (t.itemId != null) ? String(t.itemId) : '';
+                                const itemId = (item.id != null) ? String(item.id) : '';
+                                const itemName = (item.name != null) ? String(item.name) : '';
+                                const itemMatch = (txId !== '' && itemId !== '' && txId === itemId) || (txId !== '' && itemName !== '' && txId === itemName);
+                                if (!itemMatch) return false;
+                                const td = getStartOfDay(t.date);
+                                return td >= startDate && td <= endDate;
+                            })
                             .sort((a, b) => new Date(a.date) - new Date(b.date));
 
                         // Iterate day by day (safest for ledger)
