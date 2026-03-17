@@ -529,7 +529,13 @@
         async function callBackendPost(action, params) {
             params = withAdminUid(params || {});
             if (USE_FIREBASE && window.FirebaseBackend) {
-                return await window.FirebaseBackend.callBackend(action, params);
+                try {
+                    const out = await window.FirebaseBackend.callBackend(action, params);
+                    return out;
+                } catch (e) {
+                    console.error('[callBackendPost][Firebase] error', action, e);
+                    return { result: 'error', error: (e && e.message) ? e.message : String(e) };
+                }
             }
             const body = new URLSearchParams(Object.assign({ action: action }, params));
             const res = await fetch(SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
@@ -2475,7 +2481,9 @@
                     const m = extraParams.match(/partialQty=([^&]+)/);
                     if (m) params.partialQty = parseFloat(m[1]) || m[1];
                 }
+                console.log('[handleStageAction] calling update_request_stage', params, { USE_FIREBASE });
                 const data = await callBackendPost('update_request_stage', params);
+                console.log('[handleStageAction] update_request_stage response', data);
                 if (data.result === 'success') {
                     invalidateViewCache(true);
                     if (action === 'ISSUE' || action === 'PARTIAL_ISSUE') {
