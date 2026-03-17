@@ -917,6 +917,76 @@
     return { result: 'success' };
   }
 
+  /** Add back requisition materials to Database/latest inventory. Used for Undo Issue (Research only). */
+  async function restoreInventoryForRequisition(requestId, data) {
+    var latestRef = db.collection('Database').doc('latest');
+    var snap = await latestRef.get();
+    if (!snap.exists) return { result: 'error', error: 'No inventory data. Cannot undo.', code: 'NO_INVENTORY' };
+    var d = snap.data();
+    var currentVersion = (d.latestId || '').toString();
+    var payload = (d.data != null) ? d.data : d;
+    var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    if (!inv || typeof inv !== 'object') return { result: 'error', error: 'Inventory structure not found.', code: 'NO_INVENTORY' };
+
+    var built = buildReservationItemsFromRequisition(data);
+    var categories = { rawMaterials: built.rawMaterials || [], packingMaterials: built.packingMaterials || [], labels: built.labels || [] };
+    var list = (categories.rawMaterials || []).concat(categories.packingMaterials || []).concat(categories.labels || []);
+
+    function findAndAdd(arr, itemId, itemName, qty) {
+      var remaining = parseFloat(qty) || 0;
+      if (!arr || !Array.isArray(arr)) return remaining;
+      var idStr = (itemId != null ? String(itemId) : '').trim();
+      var nameStr = (itemName || '').toString().trim();
+      for (var i = 0; i < arr.length && remaining > 0; i++) {
+        var item = arr[i];
+        var match = (idStr && (String(item.id || '') === idStr || String(item.itemId || '') === idStr)) ||
+          (nameStr && (String(item.name || '') === nameStr || String(item.itemName || '') === nameStr));
+        if (!match) continue;
+        var current = parseFloat(item.quantity || item.qty || 0) || 0;
+        item.quantity = item.qty = current + remaining;
+        remaining = 0;
+      }
+      return remaining;
+    }
+
+    var nowIso = new Date().toISOString();
+    var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
+    if (!Array.isArray(payload.transactions)) payload.transactions = [];
+
+    for (var c = 0; c < list.length; c++) {
+      var ent = list[c];
+      var cat = (ent.category || 'rawMaterials').toString();
+      var arr = inv[cat];
+      var left = findAndAdd(arr, ent.itemId, ent.itemName, ent.quantity);
+      if (left > 0) {
+        await auditLog('requisition_issue_restore_missing_item', 'system', { requestId: requestId, itemName: ent.itemName || ent.itemId, remaining: left });
+      }
+      var restored = (parseFloat(ent.quantity) || 0) - left;
+      if (restored > 0) {
+        payload.transactions.push({
+          id: Date.now().toString() + '-undo-' + c,
+          itemId: ent.itemId || ent.itemName,
+          itemName: ent.itemName || ent.itemId,
+          category: cat,
+          type: 'requisition-issue-undo',
+          quantity: restored,
+          date: dateStr,
+          requestId: requestId
+        });
+      }
+    }
+
+    var saveResult = await saveInventory(payload, currentVersion);
+    if (saveResult.result === 'error' && saveResult.code === 'CONFLICT') {
+      return { result: 'error', error: saveResult.error || 'Inventory was changed by someone else. Sync and try Undo again.', code: 'CONFLICT', serverVersion: saveResult.serverVersion };
+    }
+    if (saveResult.result !== 'success' && saveResult.status !== 'success') {
+      return { result: 'error', error: (saveResult.error || 'Undo failed') };
+    }
+    await auditLog('requisition_issue_restore', 'system', { requestId: requestId, note: 'Inventory restored for undo issue' });
+    return { result: 'success' };
+  }
+
   /** Deduct finished goods from Database/latest when a dispatch is approved. */
   async function deductFinishedGoodsForDispatch(dispatchId, productName, quantity, unit, requestId) {
     var latestRef = db.collection('Database').doc('latest');
@@ -1517,14 +1587,14 @@
     var id = params.id;
     if (!id) return fail(new Error('No id'));
     var stageAction = (params.stageAction || '').toUpperCase();
-    if (stageAction === 'ISSUE' || stageAction === 'PARTIAL_ISSUE') {
+    if (stageAction === 'ISSUE' || stageAction === 'PARTIAL_ISSUE' || stageAction === 'UNDO_ISSUE') {
       var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
       var actorEmail = (params.email || '').toLowerCase().trim();
       var allowed = await hasRoleAny([actorId, actorEmail], ['Store Incharge', 'Store', 'Manager', 'Admin']);
       if (!allowed) {
         var r1 = await getUserRoleSafe(actorId);
         var r2 = actorEmail && actorEmail !== actorId ? await getUserRoleSafe(actorEmail) : '';
-        return fail(new Error('Not authorized to issue. Your role is "' + (r1 || r2 || 'UNKNOWN') + '". Set Role to exactly "Store Incharge" (or Manager/Admin).'));
+        return fail(new Error('Not authorized. Your role is "' + (r1 || r2 || 'UNKNOWN') + '". Set Role to exactly "Store Incharge" (or Manager/Admin).'));
       }
     } else if (stageAction === 'RECORD') {
       var recordActorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
@@ -1540,7 +1610,25 @@
     var snap = await docRef.get();
     if (!snap.exists) return fail(new Error('Request not found'));
     var updates = {};
-    if (stageAction === 'ISSUE') {
+    if (stageAction === 'UNDO_ISSUE') {
+      var dataU = snap.data();
+      var reqTypeU = String(dataU.Type || dataU.type || '').toLowerCase().trim();
+      var isResearchU = reqTypeU === 'research' || reqTypeU.indexOf('research') >= 0;
+      if (!isResearchU) return fail(new Error('Undo Issue is allowed only for Research requests.'));
+      var stU = (dataU.Status || dataU.status || '').toUpperCase();
+      if (!(stU === 'RESEARCH_ISSUED' || stU === 'ISSUED')) return fail(new Error('Undo is allowed only after Research is issued.'));
+      var restoreResult = await restoreInventoryForRequisition(id, dataU);
+      if (restoreResult.result !== 'success') return restoreResult;
+      updates.Status = 'SUBMITTED';
+      updates.CurrentStage = 'Pending Store & Manager';
+      updates.IssuedAt = '';
+      updates.PartialIssuedQty = 0;
+      try {
+        var resRefU = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
+        var resSnapU = await resRefU.get();
+        if (resSnapU.exists) await resRefU.update({ status: 'released', updatedAt: new Date().toISOString() });
+      } catch (e) { /* non-fatal */ }
+    } else if (stageAction === 'ISSUE') {
       var data = snap.data();
       var currentStatus = (data.Status || data.status || '').toUpperCase();
       var currentStage = (data.CurrentStage || data.currentStage || '').toUpperCase();
