@@ -2395,11 +2395,18 @@
             `;
             try {
                 const data = await callBackend('get_my_dispatches', { email: (currentUser && currentUser.email) || '', name: (currentUser && currentUser.name) || '' });
+                try {
+                    console.log('[MyDispatches] get_my_dispatches response (json)', JSON.stringify({ meta: { build: window.__REQ_APP_BUILD__, email: (currentUser && currentUser.email) || '', name: (currentUser && currentUser.name) || '' }, data: data }));
+                } catch (e) { console.log('[MyDispatches] get_my_dispatches response', data); }
                 const list = data.dispatches || data.data || [];
                 const el = document.getElementById('myDispatchesList');
                 if (!el) return;
                 if (!list.length) {
                     el.innerHTML = `<div class="text-center py-12 bg-gray-50 rounded-xl border border-gray-100"><p class="text-3xl mb-2">📦</p><p class="text-gray-600 font-medium">No dispatch requests yet.</p></div>`;
+                    // Debug: show sample dispatch docs in console to map legacy schemas.
+                    callBackend('debug_dispatch_sample', { limit: 10 }).then(function (d) {
+                        try { console.log('[MyDispatches][debug_dispatch_sample]', JSON.stringify(d)); } catch (e) { console.log('[MyDispatches][debug_dispatch_sample]', d); }
+                    }).catch(function (e) { console.log('[MyDispatches][debug_dispatch_sample] error', e); });
                     return;
                 }
                 el.innerHTML = list.map(d => {
