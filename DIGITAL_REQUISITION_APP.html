@@ -496,9 +496,19 @@
         }
         document.addEventListener('DOMContentLoaded', loadConfig);
 
+        function withAdminUid(params) {
+            // In Firebase mode, backend role checks work best with UID because Users docs are keyed by UID.
+            // Safe no-op for Apps Script mode.
+            params = params || {};
+            if (USE_FIREBASE && currentUser && currentUser.uid) {
+                if (!params.adminUid && !params.uid) params.adminUid = currentUser.uid;
+            }
+            return params;
+        }
+
         /** Single backend call: Google Sheet URL or Firebase. Returns Promise<data>. */
         async function callBackend(action, params) {
-            params = params || {};
+            params = withAdminUid(params || {});
             if (USE_FIREBASE && window.FirebaseBackend) {
                 const data = await window.FirebaseBackend.callBackend(action, params);
                 return data;
@@ -512,6 +522,7 @@
         }
 
         async function callBackendPost(action, params) {
+            params = withAdminUid(params || {});
             if (USE_FIREBASE && window.FirebaseBackend) {
                 return await window.FirebaseBackend.callBackend(action, params);
             }
@@ -556,6 +567,7 @@
                     }
                     const profile = snap.data() || {};
                     currentUser = {
+                        uid: authUser.uid,
                         email: profile.Email || authUser.email || email,
                         name: profile.Name || authUser.email || email,
                         role: profile.Role || 'Viewer',
@@ -4469,6 +4481,10 @@
                 try {
                     currentUser = JSON.parse(savedUser);
                     currentUser.role = normalizeRole(currentUser.role); // NORMALIZE ON LOAD
+                    if (USE_FIREBASE && (!currentUser.uid) && window.firebase && firebase.auth) {
+                        const au = firebase.auth().currentUser;
+                        if (au && au.uid) currentUser.uid = au.uid;
+                    }
                     localStorage.setItem('REQUISITION_LAST_ACTIVITY', Date.now().toString());
                     showApp();
                     startAutoRefresh();
