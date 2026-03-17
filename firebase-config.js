@@ -14,7 +14,7 @@
     messagingSenderId: '79940113871',
     appId: '1:79940113871:web:fbf769a8ca5999e6296eba',
     // Free email via Apps Script (no Blaze). Paste script URL after deploy. See docs/EMAIL-FREE-APPS-SCRIPT.md
-    APP_SCRIPT_EMAIL_URL: 'https://script.google.com/macros/s/AKfycbzIT7kNfUZOl1BRZ0KisnCTsdDnVYl9yYYRMPI9a6RIXnVncH3qoNWd9dgDlWuKU8Wb/exec',
+    APP_SCRIPT_EMAIL_URL: 'https://script.google.com/macros/s/AKfycbzKafyK-XL4JbIJ0gXI5G3iL4JNUk2GjwjvT1TjfUXm1zmlHhDWBkF8jcnvBdpSCn1l/exec',
     APP_SCRIPT_EMAIL_SECRET: 'MiklensEmailSecret2024XyZ789',
     APP_URL: 'https://miklens.github.io/Inventory-management'
   };
