@@ -1519,7 +1519,31 @@
       var data = snap.data();
       var currentStatus = (data.Status || data.status || '').toUpperCase();
       var currentStage = (data.CurrentStage || data.currentStage || '').toUpperCase();
-      if ((currentStatus === 'SUBMITTED' || currentStatus === 'PENDING') && currentStage.indexOf('PENDING MANAGER APPROVAL') >= 0) {
+      var reqType = String(data.Type || data.type || '').toLowerCase().trim();
+      var isResearchReq = reqType === 'research';
+
+      // Research requests: Store can issue directly (no manager approval gate).
+      // We deduct from inventory and move to WIP immediately.
+      if (isResearchReq && (currentStatus === 'SUBMITTED' || currentStatus === 'PENDING' || currentStatus === 'APPROVED' || currentStatus === 'APPROVE_REQUEST')) {
+        var deductResultR = await deductInventoryForRequisition(id, data);
+        if (deductResultR.result !== 'success') {
+          return deductResultR;
+        }
+        updates.Status = 'ISSUED';
+        updates.CurrentStage = 'Material Issued / WIP';
+        updates.IssuedAt = new Date().toISOString();
+        var resRefR = db.collection('RequisitionReservations').doc(String(id).replace(/\//g, '_'));
+        var resSnapR = await resRefR.get();
+        if (resSnapR.exists) {
+          await resRefR.update({ status: 'consumed', updatedAt: new Date().toISOString() });
+        }
+      } else {
+      var isPendingForApproval = (currentStatus === 'SUBMITTED' || currentStatus === 'PENDING') &&
+        (currentStage.indexOf('PENDING MANAGER APPROVAL') >= 0 ||
+         currentStage.indexOf('PENDING STORE') >= 0 ||
+         currentStage.indexOf('PENDING STORE & MANAGER') >= 0 ||
+         currentStage.indexOf('PENDING STORE AND MANAGER') >= 0);
+      if (isPendingForApproval) {
         // Option B: Store issued first – materials go to RESERVED until Manager approves
         updates.Status = 'ISSUED_PENDING_APPROVAL';
         updates.CurrentStage = 'Awaiting Manager Approval (Store Issued)';
@@ -1538,6 +1562,7 @@
         if (resSnap.exists) {
           await resRef.update({ status: 'consumed', updatedAt: new Date().toISOString() });
         }
+      }
       }
     } else if (stageAction === 'RECORD') {
       updates.Status = 'ISSUED';
