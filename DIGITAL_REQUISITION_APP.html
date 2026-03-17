@@ -9,12 +9,17 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Firebase config: same for all users/devices (edit firebase-config.js) -->
-    <script src="firebase-config.js"></script>
+    <script src="firebase-config.js?v=20260317_1"></script>
     <!-- Firebase (optional backend) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js"></script>
+    <script src="firebase-backend.js?v=20260317_1"></script>
+    <script>
+      // Build stamp (helps verify cache/old deployments)
+      window.__REQ_APP_BUILD__ = '2026-03-17_1';
+      console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
+    </script>
     <script>
     /* Inline fallback when firebase-backend.js is not available (e.g. GitHub Pages) */
     if (typeof window.FirebaseBackend === 'undefined') {
@@ -3294,6 +3299,8 @@
             document.getElementById('issue-wizard-back').onclick = function() { showIssueStep(1); };
             document.getElementById('issue-wizard-next').onclick = function() { showIssueStep(2); };
             document.getElementById('issue-wizard-submit').onclick = function() {
+                try { showToast('Issuing materials...', 'info'); } catch (e) {}
+                console.log('[IssueWizard] submit ISSUE for', reqId);
                 document.getElementById('issueMaterialsWizardModal').remove();
                 handleStageAction(null, reqId, 'ISSUE');
             };
