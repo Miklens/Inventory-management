@@ -14,10 +14,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260317_13"></script>
+    <script src="firebase-backend.js?v=20260317_14"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-      window.__REQ_APP_BUILD__ = '2026-03-17_13';
+      window.__REQ_APP_BUILD__ = '2026-03-17_14';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
@@ -151,10 +151,6 @@
                     </button>
                     <span id="userRole"
                         class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-bold"></span>
-                    <button type="button" onclick="openChangePasswordModal()" id="changePasswordBtn"
-                        class="text-gray-600 hover:text-gray-800 text-sm font-medium" title="Change password">
-                        🔑 Password
-                    </button>
                     <button type="button" onclick="openSettings(event)" id="settingsBtn"
                         class="text-gray-600 hover:text-gray-800" title="Settings">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -300,39 +296,6 @@
                 <p id="settingsError" class="text-red-500 text-sm text-center hidden"></p>
                 <p id="settingsSuccess" class="text-green-500 text-sm text-center hidden"></p>
             </div>
-        </div>
-    </div>
-
-    <!-- Change Password Modal -->
-    <div id="changePasswordModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 portal-hidden flex items-center justify-center" style="display:none">
-        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 p-6" onclick="event.stopPropagation()">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">Change password</h2>
-                <button type="button" onclick="closeChangePasswordModal()" class="text-gray-500 hover:text-gray-700">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <p class="text-sm text-gray-600 mb-4">Set your own password. Enter your current password first.</p>
-            <form id="changePasswordForm" onsubmit="return submitChangePassword(event);" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Current password</label>
-                    <input type="password" id="changePwCurrent" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required minlength="1" placeholder="Current password" autocomplete="current-password">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">New password</label>
-                    <input type="password" id="changePwNew" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required minlength="4" placeholder="At least 4 characters" autocomplete="new-password">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Confirm new password</label>
-                    <input type="password" id="changePwConfirm" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required minlength="4" placeholder="Same as above" autocomplete="new-password">
-                </div>
-                <p id="changePasswordError" class="text-red-500 text-sm hidden"></p>
-                <p id="changePasswordSuccess" class="text-green-500 text-sm hidden"></p>
-                <div class="flex gap-3">
-                    <button type="button" onclick="closeChangePasswordModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg">Cancel</button>
-                    <button type="submit" id="changePasswordSubmitBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Update password</button>
-                </div>
-            </form>
         </div>
     </div>
 
@@ -781,67 +744,7 @@
             }
         }
 
-        function openChangePasswordModal() {
-            if (!currentUser || !currentUser.email) return;
-            const modal = document.getElementById('changePasswordModal');
-            if (!modal) return;
-            document.getElementById('changePasswordForm').reset();
-            document.getElementById('changePasswordError').classList.add('hidden');
-            document.getElementById('changePasswordSuccess').classList.add('hidden');
-            modal.classList.remove('portal-hidden');
-            modal.style.display = 'flex';
-        }
-        function closeChangePasswordModal() {
-            const modal = document.getElementById('changePasswordModal');
-            if (modal) {
-                modal.classList.add('portal-hidden');
-                modal.style.display = 'none';
-            }
-        }
-        async function submitChangePassword(ev) {
-            if (ev) ev.preventDefault();
-            if (!currentUser || !currentUser.email) return false;
-            const current = document.getElementById('changePwCurrent').value;
-            const newPw = document.getElementById('changePwNew').value;
-            const confirmPw = document.getElementById('changePwConfirm').value;
-            const errEl = document.getElementById('changePasswordError');
-            const okEl = document.getElementById('changePasswordSuccess');
-            const btn = document.getElementById('changePasswordSubmitBtn');
-            errEl.classList.add('hidden');
-            okEl.classList.add('hidden');
-            if (newPw.length < 4) {
-                errEl.textContent = 'New password must be at least 4 characters.';
-                errEl.classList.remove('hidden');
-                return false;
-            }
-            if (newPw !== confirmPw) {
-                errEl.textContent = 'New password and confirm do not match.';
-                errEl.classList.remove('hidden');
-                return false;
-            }
-            if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
-            try {
-                const data = await callBackendPost('change_password', {
-                    email: currentUser.email,
-                    currentPassword: current,
-                    newPassword: newPw
-                });
-                if (data && data.result === 'success') {
-                    okEl.textContent = 'Password updated. Use your new password next time you log in.';
-                    okEl.classList.remove('hidden');
-                    document.getElementById('changePasswordForm').reset();
-                    setTimeout(closeChangePasswordModal, 1500);
-                } else {
-                    errEl.textContent = (data && data.error) ? data.error : 'Failed to update password.';
-                    errEl.classList.remove('hidden');
-                }
-            } catch (e) {
-                errEl.textContent = e.message || 'Connection error.';
-                errEl.classList.remove('hidden');
-            }
-            if (btn) { btn.disabled = false; btn.textContent = 'Update password'; }
-            return false;
-        }
+        // Password change is managed via Firebase Auth (console/reset email), not in-app.
 
         async function testSettingsUrl() {
             const urlInput = document.getElementById('settingsUrlInput');
