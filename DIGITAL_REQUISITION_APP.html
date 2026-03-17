@@ -14,10 +14,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260317_14"></script>
+    <script src="firebase-backend.js?v=20260317_16"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-      window.__REQ_APP_BUILD__ = '2026-03-17_14';
+      window.__REQ_APP_BUILD__ = '2026-03-17_16';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
@@ -1235,6 +1235,7 @@
                                     'bg-yellow-100 text-yellow-700';
                         const statusText = isApproved ? 'APPROVED' : (isRejected ? 'REJECTED' : (isCorrection ? 'CORRECTION' : (isStoreIssuedPending ? 'Store Issued – Awaiting Approval' : req.status)));
 
+                        const createdAt = formatDateTime(guessCreatedAt(req));
                         return `
                             <div onclick="viewRequestDetails('${req.id}')" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group">
                                 <div class="flex justify-between items-center gap-4">
@@ -1245,6 +1246,7 @@
                                             <span class="${statusStyle} text-[8px] font-black px-1.5 py-0.5 rounded uppercase">${statusText}</span>
                                         </div>
                                         <h3 class="font-black text-gray-900 truncate leading-tight text-base group-hover:text-blue-600 transition-colors">${getRequestProductNameDisplay(req)}</h3>
+                                        ${createdAt ? `<p class="text-[9px] text-gray-400 font-bold mt-1">🕒 ${createdAt}</p>` : ''}
                                         <div class="flex items-center gap-2 mt-1">
                                             <span class="text-[8px] font-black uppercase text-gray-400">At Station:</span>
                                             <span class="text-[8px] font-black px-1.5 py-0.5 rounded border ${getStageColor(isApproved && req.currentStage.includes('MANAGER APPROVAL') ? 'Awaiting Employee Confirmation' : req.currentStage)} uppercase tracking-tighter">${isApproved && req.currentStage.includes('MANAGER APPROVAL') ? 'Awaiting Employee Confirmation' : req.currentStage}</span>
@@ -2140,6 +2142,20 @@
             return status;
         }
 
+        function formatDateTime(v) {
+            if (!v) return '';
+            try {
+                const d = new Date(v);
+                if (isNaN(d.getTime())) return '';
+                return d.toLocaleString();
+            } catch (e) { return ''; }
+        }
+
+        function guessCreatedAt(obj) {
+            if (!obj) return '';
+            return obj.CreatedDate || obj.createdDate || obj.CreatedAt || obj.createdAt || obj.date || obj.Date || obj.timestamp || obj.Timestamp || '';
+        }
+
         function getRequestProductNameDisplay(req) {
             if (!req) return '';
             const name = (req.productName || '').trim();
@@ -2340,7 +2356,7 @@
                     const unit = (d.Unit || d.unit || '').toString().replace(/</g, '&lt;');
                     const reqId = (d.RequestID || d.requestId || '').toString().replace(/</g, '&lt;');
                     const isStandalone = (reqId || '') === '' && id.indexOf('STD-') === 0;
-                    const when = d.RequestedAt ? new Date(d.RequestedAt).toLocaleString() : '';
+                    const when = formatDateTime(d.RequestedAt || d.requestedAt || '');
                     const remarks = (d.Remarks || d.remarks || '').toString();
                     return `
                         <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
@@ -2588,6 +2604,7 @@
                         return ta > tb ? -1 : ta < tb ? 1 : 0;
                     });
                     const html = data.requests.map(req => {
+                        const createdAt = formatDateTime(guessCreatedAt(req));
                         return `
                             <div onclick="viewRequestDetails('${req.id}')" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group fade-in mb-3">
                                 <div class="flex justify-between items-center gap-4">
@@ -2601,6 +2618,7 @@
                                         <h3 class="font-black text-gray-800 truncate text-base group-hover:text-blue-600 transition-colors leading-tight">${getRequestProductNameDisplay(req)}</h3>
                                         <div class="flex items-center gap-3 mt-1.5">
                                             <p class="text-[9px] text-gray-400 font-black uppercase">Staff: <span class="text-gray-600">${req.requesterName}</span></p>
+                                            ${createdAt ? `<p class="text-[9px] text-gray-400 font-black uppercase">🕒 <span class="text-gray-600">${createdAt}</span></p>` : ''}
                                         </div>
                                     </div>
                                     <div class="text-right flex flex-col items-end">
@@ -3932,7 +3950,7 @@
                             const dispatches = (dData.dispatches || dData.data || []);
                             if (dispatchHistoryEl) {
                                 if (dispatches.length === 0) dispatchHistoryEl.innerHTML = '<p class="text-xs text-gray-500">No dispatches yet.</p>';
-                                else dispatchHistoryEl.innerHTML = dispatches.map(d => `<div class="flex justify-between items-center text-xs py-1 border-b border-gray-100"><span>${(d.productName || '').replace(/</g, '&lt;')} · ${d.quantity} ${(d.unit || '').replace(/</g, '&lt;')}</span><span class="font-bold ${d.status === 'APPROVED' ? 'text-green-600' : 'text-amber-600'}">${(d.status || '').replace(/</g, '&lt;')}</span></div>`).join('');
+                                else dispatchHistoryEl.innerHTML = dispatches.map(d => `<div class="flex justify-between items-center text-xs py-1 border-b border-gray-100"><span>${(d.productName || '').replace(/</g, '&lt;')} · ${d.quantity} ${(d.unit || '').replace(/</g, '&lt;')}${(d.requestedAt || d.RequestedAt) ? ' · ' + formatDateTime(d.requestedAt || d.RequestedAt) : ''}</span><span class="font-bold ${d.status === 'APPROVED' ? 'text-green-600' : 'text-amber-600'}">${(d.status || '').replace(/</g, '&lt;')}</span></div>`).join('');
                             }
                         })
                         .catch(() => { if (dispatchHistoryEl) dispatchHistoryEl.innerHTML = '<p class="text-xs text-red-500">Could not load.</p>'; });
