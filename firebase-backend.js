@@ -2227,6 +2227,7 @@
     if (allowedStatuses.indexOf(status) < 0) return fail(new Error('Dispatch allowed only for produced batches or approved requests (direct from stock)'));
     var dispatchId = 'DSP-' + Date.now();
     var isDirectFromStock = (status === 'APPROVED' || status === 'APPROVE_REQUEST');
+    var requesterEm = (reqData.EmployeeEm || reqData.requesterEmail || '').toString().trim();
     await db.collection('RequisitionDispatches').doc(dispatchId).set({
       DispatchID: dispatchId,
       RequestID: requestId,
@@ -2237,6 +2238,7 @@
       Status: 'PENDING_APPROVAL',
       RequestedBy: requestedBy,
       RequestedByEmail: requestedByEmail || '',
+      RequesterEmail: requesterEm,
       RequestedAt: new Date().toISOString(),
       ApprovedBy: '',
       ApprovedAt: null,
@@ -2244,7 +2246,6 @@
       Remarks: remarks,
       DirectFromStock: isDirectFromStock
     });
-    var requesterEm = (reqData.EmployeeEm || reqData.requesterEmail || '').trim();
     await pushNotificationQueue('dispatch_approval_required', {
       dispatchId: dispatchId,
       requestId: requestId,
@@ -2266,8 +2267,9 @@
     var mine = all.filter(function (d) {
       var e = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
       var by = (d.RequestedBy || d.requestedBy || '').toLowerCase().trim();
+      var reqE = (d.RequesterEmail || d.requesterEmail || '').toLowerCase().trim();
       // Legacy dispatches may store only name (RequestedBy) without email.
-      return (e && e === email) || (by && (by === email || (name && by === name)));
+      return (reqE && reqE === email) || (e && e === email) || (by && (by === email || (name && by === name)));
     });
     // newest first
     mine.sort(function (a, b) {
@@ -2297,7 +2299,10 @@
 
     var isAdmin = await hasRoleAny([actorId, actorEmail], ['Manager', 'Admin']);
     var ownerEmail = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
-    if (!isAdmin && (!ownerEmail || ownerEmail !== actorEmail)) return fail(new Error('You can edit only your own dispatch requests'));
+    var requesterEmail = (d.RequesterEmail || d.requesterEmail || '').toLowerCase().trim();
+    if (!isAdmin && !((ownerEmail && ownerEmail === actorEmail) || (requesterEmail && requesterEmail === actorEmail))) {
+      return fail(new Error('You can edit only dispatches linked to your request (or the ones you created)'));
+    }
 
     await docRef.update({
       Quantity: qty,
@@ -2325,7 +2330,10 @@
 
     var isAdmin = await hasRoleAny([actorId, actorEmail], ['Manager', 'Admin']);
     var ownerEmail = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
-    if (!isAdmin && (!ownerEmail || ownerEmail !== actorEmail)) return fail(new Error('You can cancel only your own dispatch requests'));
+    var requesterEmail = (d.RequesterEmail || d.requesterEmail || '').toLowerCase().trim();
+    if (!isAdmin && !((ownerEmail && ownerEmail === actorEmail) || (requesterEmail && requesterEmail === actorEmail))) {
+      return fail(new Error('You can cancel only dispatches linked to your request (or the ones you created)'));
+    }
 
     await docRef.update({
       Status: 'CANCELLED',
