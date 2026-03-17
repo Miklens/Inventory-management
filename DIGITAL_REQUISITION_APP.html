@@ -14,10 +14,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260317_18"></script>
+    <script src="firebase-backend.js?v=20260317_19"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-      window.__REQ_APP_BUILD__ = '2026-03-17_18';
+      window.__REQ_APP_BUILD__ = '2026-03-17_19';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
@@ -4801,6 +4801,7 @@
         window.onload = function () {
             loadConfig();
             try { closeSettings(); } catch (e) {}
+            attachSettingsModalListeners();
 
             // Check if already logged in
             const savedUser = localStorage.getItem('miklens_user');
@@ -4839,18 +4840,20 @@
                 }
             }
 
+            // Settings modal listeners are attached at the top of onload.
+        };
 
-            // Attach Settings modal event listeners
+        function attachSettingsModalListeners() {
+            if (window.__settingsListenersAttached) return;
+            window.__settingsListenersAttached = true;
             const settingsBtn = document.getElementById('settingsBtn');
             const settingsCloseBtn = document.getElementById('settingsCloseBtn');
             const settingsCancelBtn = document.getElementById('settingsCancelBtn');
             const settingsSaveBtn = document.getElementById('settingsSaveBtn');
-
             if (settingsBtn) {
                 settingsBtn.addEventListener('click', function (e) {
                     e.preventDefault();
-                    console.log('Settings button clicked');
-                    openSettings();
+                    openSettings(e);
                 });
             }
             if (settingsCloseBtn) {
@@ -4878,7 +4881,7 @@
                     testFirebaseConnection();
                 });
             }
-        };
+        }
 
         // ==========================================
         // OPERATOR - MASTER ARCHIVE (FOLDER VIEW)
