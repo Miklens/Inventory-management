@@ -14,10 +14,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260317_7"></script>
+    <script src="firebase-backend.js?v=20260317_8"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-      window.__REQ_APP_BUILD__ = '2026-03-17_7';
+      window.__REQ_APP_BUILD__ = '2026-03-17_8';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
@@ -2447,8 +2447,10 @@
                     `;
                 }).join('');
             } catch (e) {
+                try { console.error('[MyDispatches] renderMyDispatches failed', e); } catch (x) {}
                 const el = document.getElementById('myDispatchesList');
-                if (el) el.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-6 text-center"><p class="text-red-600 font-semibold">Failed to load.</p><p class="text-sm text-red-500 mt-1">Try SYNC.</p></div>`;
+                const msg = (e && (e.message || e.toString)) ? (e.message || String(e)) : 'Unknown error';
+                if (el) el.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-6 text-center"><p class="text-red-600 font-semibold">Failed to load.</p><p class="text-sm text-red-500 mt-1">Try SYNC.</p><p class="text-[10px] text-red-400 mt-2 break-words">${(msg || '').replace(/</g,'&lt;')}</p></div>`;
             }
         }
 
