@@ -3693,7 +3693,7 @@
                     // AI INSIGHTS – CONFIG & HELPERS
                     // ============================
                     const AI_LOCAL_STORAGE_KEY = 'MIKLENS_AI_CONFIG_V1';
-                    const AI_CALL_COOLDOWN_MS = 4000;
+                    const AI_CALL_COOLDOWN_MS = 6000;
                     window._lastAiCallTime = 0;
                     window._aiRequestInFlight = false;
 
@@ -3725,10 +3725,10 @@
                                         { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', apiModel: 'gemini-1.5-flash-latest', enabled: true, keys: [], lastKeyIndex: 0 },
                                         { id: 'gemini-3-flash', name: 'Gemini 3 Flash', apiModel: 'gemini-1.5-flash', enabled: true, keys: [], lastKeyIndex: 0 },
                                         { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', apiModel: 'gemini-1.5-pro', enabled: true, keys: [], lastKeyIndex: 0 },
-                                        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', apiModel: 'gemini-2.5-flash', enabled: true, keys: [], lastKeyIndex: 0 },
-                                        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', apiModel: 'gemini-2.5-pro', enabled: true, keys: [], lastKeyIndex: 0 }
+                                        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', apiModel: 'gemini-2.0-flash', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'gemini-2.0-pro', name: 'Gemini 2.0 Pro', apiModel: 'gemini-2.0-pro', enabled: true, keys: [], lastKeyIndex: 0 }
                                     ],
-                                    modelFallbackOrder: ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.5-pro'],
+                                    modelFallbackOrder: ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-3.1-pro', 'gemini-2.0-flash', 'gemini-2.0-pro'],
                                     preferredModel: 'gemini-3.1-flash-lite'
                                 },
                                 groq: {
@@ -3765,8 +3765,8 @@
                     async function callGeminiModel(model, apiKey, promptText) {
                         // Use the same style as Herbicide app: v1/models/{model}:generateContent
                         // Model IDs should be the official Gemini IDs (e.g. gemini-3.1-flash-lite-preview).
-                        const modelId = model.apiModel || 'gemini-3.1-flash-lite-preview';
-                        const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                        const modelId = model.apiModel || 'gemini-1.5-flash-latest';
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
                         const body = {
                             contents: [{ role: 'user', parts: [{ text: promptText }] }],
                             generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
@@ -3885,6 +3885,10 @@
                                         lastError = e;
                                         const status = e && e.status;
                                         if (status && [401, 403, 429, 500, 502, 503, 504].indexOf(status) >= 0) {
+                                            if (status === 429) {
+                                                // If we hit 429, don't spam other models with the same exhausted key in this loop
+                                                break; 
+                                            }
                                             continue;
                                         } else {
                                             break;
