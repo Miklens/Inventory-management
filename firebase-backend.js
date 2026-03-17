@@ -2364,6 +2364,34 @@
     return ok({ message: 'Dispatch cancelled' });
   }
 
+  // Debug helper (read-only): returns a small sample of dispatch docs and field names.
+  async function debugDispatchSample(params) {
+    var limit = parseInt(params.limit || '10', 10);
+    if (!(limit > 0 && limit <= 25)) limit = 10;
+    try {
+      var snap = await db.collection('RequisitionDispatches').limit(limit).get();
+      var list = [];
+      snap.forEach(function (d) {
+        var data = d.data() || {};
+        list.push({
+          id: d.id,
+          keys: Object.keys(data || {}).slice(0, 30),
+          RequestID: data.RequestID || data.requestId || data.RequestId || data.ReqID || '',
+          ProductName: data.ProductName || data.productName || '',
+          Quantity: data.Quantity != null ? data.Quantity : data.quantity,
+          Status: data.Status || data.status || '',
+          RequestedBy: data.RequestedBy || data.requestedBy || '',
+          RequestedByEmail: data.RequestedByEmail || data.requestedByEmail || '',
+          RequesterEmail: data.RequesterEmail || data.requesterEmail || '',
+          RequestedAt: data.RequestedAt || data.requestedAt || ''
+        });
+      });
+      return ok({ collection: 'RequisitionDispatches', sample: list });
+    } catch (e) {
+      return fail(e);
+    }
+  }
+
   async function approveDispatch(params) {
     var dispatchId = params.dispatchId || params.id;
     var approvedBy = params.user || 'Manager';
@@ -2832,6 +2860,7 @@
     request_dispatch: requestDispatch,
     edit_dispatch: editDispatch,
     cancel_dispatch: cancelDispatch,
+    debug_dispatch_sample: debugDispatchSample,
     approve_dispatch: approveDispatch,
     get_inventory_for_standalone_dispatch: getInventoryForStandaloneDispatch,
     standalone_dispatch_from_stock: standaloneDispatchFromStock,
