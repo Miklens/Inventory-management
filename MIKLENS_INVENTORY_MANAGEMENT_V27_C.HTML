@@ -10184,7 +10184,10 @@
                                     method: 'POST',
                                     mode: 'no-cors',
                                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                    body: new URLSearchParams({ data: JSON.stringify(backupPayload) })
+                                    body: new URLSearchParams({ 
+                                        secret: 'MiklensEmailSecret2024XyZ789',
+                                        data: JSON.stringify(backupPayload) 
+                                    })
                                 });
                                 // no-cors means we can't read the response, but we assume success if no throw
                                 result = { result: 'success' };
