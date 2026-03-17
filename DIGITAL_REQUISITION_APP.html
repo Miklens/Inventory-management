@@ -2135,6 +2135,8 @@
                 requesterEmail: currentUser.email,
                 requesterName: currentUser.name,
                 items: JSON.stringify(items), // Send as JSON string
+                quantity: items.length,       // FIX: Send count as top-level quantity
+                unit: 'Items',                // FIX: Set unit for display
                 purpose: document.getElementById('resPurpose').value,
                 remarks: document.getElementById('resRemarks').value
             };
