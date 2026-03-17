@@ -2688,11 +2688,22 @@
                     function calculateStock(item, category, targetDateStr) {
                         if (!item || !item.openingStockDate) return { openingStock: 0, received: 0, consumed: 0, closingStock: 0 };
 
+                        // Some integrations historically saved transactions with itemId as NAME (not numeric id).
+                        // Accept either item.id or item.name so stock stays consistent across apps.
+                        function txMatchesItem(tx) {
+                            if (!tx) return false;
+                            if (tx.category !== category) return false;
+                            const txId = (tx.itemId != null) ? String(tx.itemId) : '';
+                            const itemId = (item.id != null) ? String(item.id) : '';
+                            const itemName = (item.name != null) ? String(item.name) : '';
+                            return (txId !== '' && itemId !== '' && txId === itemId) || (txId !== '' && itemName !== '' && txId === itemName);
+                        }
+
                         const targetDate = getStartOfDay(targetDateStr);
                         const itemOpeningDate = getStartOfDay(item.openingStockDate);
 
                         const transactionsOnTargetDate = appState.transactions.filter(tx =>
-                            tx.category === category && tx.itemId == item.id && getLocalDateString(tx.date) === targetDateStr
+                            txMatchesItem(tx) && getLocalDateString(tx.date) === targetDateStr
                         );
                         const received = transactionsOnTargetDate.filter(t => t.type === 'receive' || t.type === 'stock-take-adj-in' || t.type === 'production-add').reduce((sum, t) => sum + t.quantity, 0);
                         const consumed = transactionsOnTargetDate.filter(t => t.type === 'consume' || t.type === 'stock-take-adj-out' || t.type === 'production-consume' || t.type === 'requisition-issue' || t.type === 'dispatch').reduce((sum, t) => sum + (t.quantity > 0 ? t.quantity : -t.quantity), 0);
@@ -2704,7 +2715,7 @@
                         let openingStock = item.openingStock;
                         const transactionsBeforeTarget = appState.transactions.filter(tx => {
                             const txDate = getStartOfDay(tx.date);
-                            return tx.category === category && tx.itemId == item.id && txDate >= itemOpeningDate && txDate < targetDate;
+                            return txMatchesItem(tx) && txDate >= itemOpeningDate && txDate < targetDate;
                         });
 
                         transactionsBeforeTarget.forEach(tx => {
@@ -2739,7 +2750,13 @@
 
                         const transactionsByDate = {};
                         appState.transactions
-                            .filter(tx => tx.category === category && tx.itemId === item.id)
+                            .filter(tx => {
+                                if (!tx || tx.category !== category) return false;
+                                const txId = (tx.itemId != null) ? String(tx.itemId) : '';
+                                const itemId = (item.id != null) ? String(item.id) : '';
+                                const itemName = (item.name != null) ? String(item.name) : '';
+                                return (txId !== '' && itemId !== '' && txId === itemId) || (txId !== '' && itemName !== '' && txId === itemName);
+                            })
                             .forEach(tx => {
                                 const txDateStr = getLocalDateString(tx.date);
                                 if (!transactionsByDate[txDateStr]) {
