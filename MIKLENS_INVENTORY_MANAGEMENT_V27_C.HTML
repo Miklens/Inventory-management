@@ -3693,6 +3693,9 @@
                     // AI INSIGHTS – CONFIG & HELPERS
                     // ============================
                     const AI_LOCAL_STORAGE_KEY = 'MIKLENS_AI_CONFIG_V1';
+                    const AI_CALL_COOLDOWN_MS = 4000;
+                    window._lastAiCallTime = 0;
+                    window._aiRequestInFlight = false;
 
                     function loadAiConfig() {
                         try {
@@ -3832,17 +3835,24 @@
                         })();
 
                         const basePrompt = [
-                            'You are an AI assistant for Miklens Inventory Management.',
-                            'You answer questions ONLY using the provided JSON data summary.',
-                            'If something is not present in the data, say you do not know instead of guessing.',
-                            'Prefer structured numeric answers, bullet points and small tables in markdown.',
+                            'You are the "Miklens Inventory Analyst", a senior AI specialized in supply chain and warehouse management.',
+                            'Your goal is to provide deep insights using the provided JSON "DATA SUMMARY".',
+                            '',
+                            'CRITICAL INSTRUCTIONS:',
+                            '1. Data Context: The summary contains PRE-AGGREGATED data (trends, top performers, health) and the last 100 raw transactions. Use the AGGREGATED fields for any question about trends, "total", "average", "top", or "most".',
+                            '2. Formats: ALWAYS use Markdown tables for lists/comparisons and bullet points for key takeaways.',
+                            '3. Precision: Be numeric. If consumption is 500 units, say "500 units".',
+                            '4. Scope: If the question is NOT about inventory/transactions, politely say you are focused on Miklens Inventory data.',
+                            '5. Unknowns: If the specific data is missing from the summary, say "I do not have enough data to answer that" instead of guessing.',
+                            '6. Categories: Knowledgeable about rawMaterials, packingMaterials, labels, finishedGoods.',
                             '',
                             'DATA SUMMARY (JSON):',
                             dataJson,
                             '',
-                            'QUESTION:',
+                            'USER QUESTION:',
                             question
                         ].join('\n');
+
 
                         let lastError = null;
 
@@ -4064,75 +4074,166 @@
                             const selectedDate = todayStr;
                             const categoryKeys = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
                             const inventory = appState.inventory || {};
+                            const allTransactions = appState.transactions || [];
 
                             const categoryTotals = {};
                             const items = [];
 
+                            // 1) Inventory & Stock Calculation
                             categoryKeys.forEach(cat => {
                                 const list = Array.isArray(inventory[cat]) ? inventory[cat] : [];
                                 let totalValue = 0;
                                 for (let i = 0; i < list.length; i++) {
                                     const it = list[i] || {};
-                                    let closingStock = null;
+                                    let closingStock = 0;
                                     try {
                                         if (typeof calculateStock === 'function') {
                                             const res = calculateStock(it, cat, selectedDate);
-                                            closingStock = res && typeof res.closingStock === 'number' ? res.closingStock : null;
+                                            closingStock = (res && typeof res.closingStock === 'number') ? res.closingStock : 0;
                                         }
                                     } catch (e) {}
-                                    const unitCost = (it.currentAverageCost != null ? it.currentAverageCost : it.price);
-                                    const cost = (typeof unitCost === 'number' && isFinite(unitCost)) ? unitCost : 0;
-                                    const stock = (typeof closingStock === 'number' && isFinite(closingStock)) ? closingStock : 0;
-                                    const value = Math.max(0, stock) * cost;
+                                    const cost = (it.currentAverageCost != null) ? it.currentAverageCost : (it.price || 0);
+                                    const value = Math.max(0, closingStock) * cost;
                                     totalValue += value;
                                     items.push({
                                         category: cat,
-                                        id: it.id,
                                         name: it.name,
                                         unit: it.unit,
-                                        stock: Number(stock.toFixed(3)),
-                                        unitCost: Number(cost.toFixed(4)),
+                                        stock: Number(closingStock.toFixed(3)),
+                                        cost: Number(cost.toFixed(4)),
                                         value: Number(value.toFixed(2)),
-                                        minStockLevel: it.minStockLevel != null ? it.minStockLevel : it.minStockLevel !== undefined ? it.minStockLevel : undefined,
-                                        expiryDate: it.expiryDate || null
+                                        min: it.minStockLevel,
+                                        exp: it.expiryDate || null
                                     });
                                 }
                                 categoryTotals[cat] = Number(totalValue.toFixed(2));
                             });
 
-                            // Keep tx slice compact
-                            const txCompact = (txSlice || []).map(t => ({
-                                date: t.date || '',
-                                type: t.type || '',
-                                subtype: t.subtype || '',
-                                category: t.category || '',
-                                itemId: t.itemId,
-                                itemName: t.itemName || '',
-                                quantity: t.quantity,
-                                unit: t.unit || '',
-                                customerName: t.customerName || '',
-                                supplierName: t.supplierName || '',
-                                invoiceNo: t.invoiceNo || '',
-                                reference: t.reference || t.sourceReference || '',
-                                notes: t.notes || ''
-                            }));
+                            // 2) COMPREHENSIVE PRE-AGGREGATION
+                            const now = new Date();
+                            const oneMonthAgo = new Date(); oneMonthAgo.setMonth(now.getMonth() - 1);
+                            const threeMonthsAgo = new Date(); threeMonthsAgo.setMonth(now.getMonth() - 3);
+                            const twelveMonthsAgo = new Date(); twelveMonthsAgo.setMonth(now.getMonth() - 12);
+
+                            const aggregations = {
+                                monthlyConsumption: {}, // { "Item Name": { "YYYY-MM": qty } }
+                                topConsumedItems: [],   // [ { name, qty, value } ]
+                                wastageSummary: {
+                                    spillage: 0, expired: 0, qc_rejection: 0, process_loss: 0, cleaning: 0, total: 0
+                                },
+                                customerDispatch: {},   // { "Customer Name": { qty, value } }
+                                supplierDeliveries: {}, // { "Supplier Name": { count, totalValue } }
+                                recentTrends: []        // last 6 months qty totals
+                            };
+
+                            const itemConsumptionMap = {};
+                            const monthlyTotals = {};
+
+                            allTransactions.forEach(t => {
+                                if (!t.date || isNaN(new Date(t.date).getTime())) return;
+                                const tDate = new Date(t.date);
+                                const monthKey = t.date.slice(0, 7); // YYYY-MM
+                                const qty = parseFloat(t.quantity) || 0;
+                                const type = (t.type || '').toLowerCase();
+                                const subtype = (t.subtype || '').toLowerCase();
+                                const itemName = t.itemName || 'Unknown';
+
+                                // Track all-time consumption for top-list
+                                if (type === 'consume' || type === 'dispatch') {
+                                    if (!itemConsumptionMap[itemName]) itemConsumptionMap[itemName] = { qty: 0, value: 0, unit: t.unit || '' };
+                                    itemConsumptionMap[itemName].qty += qty;
+                                    // Use avg cost if possible
+                                    const cost = findItemCost(itemName, t.category);
+                                    itemConsumptionMap[itemName].value += (qty * cost);
+
+                                    // Monthly breakdown (last 12 months)
+                                    if (tDate >= twelveMonthsAgo) {
+                                        if (!aggregations.monthlyConsumption[itemName]) aggregations.monthlyConsumption[itemName] = {};
+                                        aggregations.monthlyConsumption[itemName][monthKey] = (aggregations.monthlyConsumption[itemName][monthKey] || 0) + qty;
+                                    }
+                                }
+
+                                // Track Wastage (last 3 months)
+                                if (type === 'consume' && ['spillage', 'expired', 'qc_rejection', 'process_loss', 'cleaning'].includes(subtype)) {
+                                    aggregations.wastageSummary[subtype] += qty;
+                                    aggregations.wastageSummary.total += qty;
+                                }
+
+                                // Customer aggregates
+                                if (type === 'dispatch' && t.customerName) {
+                                    const c = t.customerName;
+                                    if (!aggregations.customerDispatch[c]) aggregations.customerDispatch[c] = { qty: 0, value: 0 };
+                                    aggregations.customerDispatch[c].qty += qty;
+                                    const cost = findItemCost(itemName, t.category);
+                                    aggregations.customerDispatch[c].value += (qty * cost);
+                                }
+
+                                // Supplier aggregates
+                                if (type === 'receive' && t.supplierName) {
+                                    const s = t.supplierName;
+                                    if (!aggregations.supplierDeliveries[s]) aggregations.supplierDeliveries[s] = { count: 0, value: 0 };
+                                    aggregations.supplierDeliveries[s].count++;
+                                    const cost = parseFloat(t.purchasePrice) || findItemCost(itemName, t.category);
+                                    aggregations.supplierDeliveries[s].value += (qty * cost);
+                                }
+                            });
+
+                            // Build top 10 lists
+                            aggregations.topConsumedItems = Object.keys(itemConsumptionMap)
+                                .map(name => ({ name, ...itemConsumptionMap[name] }))
+                                .sort((a, b) => b.value - a.value)
+                                .slice(0, 15);
+
+                            // Helper for cost finding
+                            function findItemCost(name, cat) {
+                                const list = inventory[cat] || [];
+                                const it = list.find(i => i.name === name);
+                                return it ? (it.currentAverageCost || it.price || 0) : 0;
+                            }
 
                             return {
                                 meta: {
-                                    generatedAt: new Date().toISOString(),
-                                    selectedDate: selectedDate,
-                                    question: qTrim
+                                    generatedAt: now.toISOString(),
+                                    currentStockDate: selectedDate,
+                                    totalTxCount: allTransactions.length
                                 },
-                                totals: {
-                                    categoryValueINR: categoryTotals
+                                summary: {
+                                    totalInventoryValueINR: Object.values(categoryTotals).reduce((a, b) => a + b, 0),
+                                    categoryValueINR: categoryTotals,
+                                    wastage: aggregations.wastageSummary
                                 },
-                                items: items, // includes all categories; AI can filter
-                                transactions: txCompact
+                                topPerformers: {
+                                    itemsByConsumptionValue: aggregations.topConsumedItems,
+                                    customersByDispatch: aggregations.customerDispatch,
+                                    suppliersByDeliveries: aggregations.supplierDeliveries
+                                },
+                                trends: {
+                                    monthlyItemConsumption: aggregations.monthlyConsumption
+                                },
+                                currentInventory: items.filter(i => i.stock !== 0 || i.min > 0), // Filter out useless zeros
+                                recentTransactions: allTransactions.slice(-100).map(t => ({ date: t.date, type: t.type, item: t.itemName, qty: t.quantity, party: t.customerName || t.supplierName }))
                             };
                         }
 
+
                         async function handleAsk(question) {
                             if (!question || !question.trim()) return;
+                            
+                            // Rate Limiting & Overlap Guard
+                            const now = Date.now();
+                            const timeSinceLast = now - (window._lastAiCallTime || 0);
+                            
+                            if (window._aiRequestInFlight) {
+                                showToast('AI is already processing a question. Please wait...', 'warning');
+                                return;
+                            }
+                            
+                            if (timeSinceLast < AI_CALL_COOLDOWN_MS) {
+                                const wait = Math.ceil((AI_CALL_COOLDOWN_MS - timeSinceLast) / 1000);
+                                showToast(`Please wait ${wait}s before asking again (RPM protection)`, 'warning');
+                                return;
+                            }
+
                             const qTrim = question.trim();
                             appendMessage('user', qTrim);
                             input.value = '';
@@ -4280,8 +4381,88 @@
                                 return;
                             }
 
+                            // 1.e) Total stock value across all categories
+                            if (qLower.includes('total stock value') || qLower.includes('total inventory value')) {
+                                let total = 0;
+                                const cats = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
+                                const todayStr = (typeof getToday === 'function') ? getToday() : (new Date().toISOString().slice(0, 10));
+                                let html = 'AI:<br><p class="text-xs font-semibold">Total Inventory Value Summary:</p><ul class="text-xs list-disc pl-4 mt-1">';
+                                cats.forEach(cat => {
+                                    let catTotal = 0;
+                                    (appState.inventory[cat] || []).forEach(it => {
+                                        let closing = 0;
+                                        try { if (typeof calculateStock === 'function') closing = calculateStock(it, cat, todayStr).closingStock || 0; } catch(e){}
+                                        const cost = it.currentAverageCost != null ? it.currentAverageCost : (it.price || 0);
+                                        catTotal += (Math.max(0, closing) * cost);
+                                    });
+                                    total += catTotal;
+                                    html += `<li>${cat}: ₹ ${catTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</li>`;
+                                });
+                                html += `</ul><p class="text-[13px] mt-2 font-bold text-indigo-800">Grand Total: ₹ ${total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>`;
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
+                            // 1.f) Expiring items (next 30 days)
+                            if (qLower.includes('expir') && (qLower.includes('soon') || qLower.includes('next 30 days') || qLower.includes('alert'))) {
+                                const today = new Date();
+                                const next30 = new Date(); next30.setDate(today.getDate() + 30);
+                                let found = [];
+                                ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'].forEach(cat => {
+                                    (appState.inventory[cat] || []).forEach(it => {
+                                        if (!it.expiryDate) return;
+                                        const exp = new Date(it.expiryDate);
+                                        if (exp >= today && exp <= next30) found.push({ ...it, cat });
+                                    });
+                                });
+                                if (!found.length) {
+                                    appendMessage('assistant', 'AI:<br><span class="text-xs text-green-600">No items are due for expiry in the next 30 days.</span>');
+                                    return;
+                                }
+                                let html = 'AI:<br><p class="text-xs mb-1 text-red-600 font-bold">Expiry Alerts (Next 30 Days):</p><ul class="text-[11px] space-y-1">';
+                                found.forEach(f => {
+                                    html += `<li>• <strong>${f.name}</strong> (${f.cat}) - Exp: ${f.expiryDate}</li>`;
+                                });
+                                html += '</ul>';
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
+                            // 1.g) Last 10 transactions
+                            if (qLower.includes('last 10 trans') || qLower.includes('recent transactions')) {
+                                const txs = (appState.transactions || []).slice(-10).reverse();
+                                if (!txs.length) { appendMessage('assistant', 'AI:<br><span class="text-xs">No transactions found.</span>'); return; }
+                                let html = 'AI:<br><p class="text-xs mb-1">Recent 10 Transactions:</p><table class="text-[10px] w-full border-collapse border"><thead><tr class="bg-gray-50"><th>Date</th><th>Type</th><th>Item</th><th>Qty</th></tr></thead><tbody>';
+                                txs.forEach(t => {
+                                    html += `<tr><td class="border p-[2px]">${(t.date || '').slice(0, 10)}</td><td class="border p-[2px]">${t.type}</td><td class="border p-[2px]">${t.itemName}</td><td class="border p-[2px] text-right">${t.quantity}</td></tr>`;
+                                });
+                                html += '</tbody></table>';
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
+                            // 1.h) Wastage summary
+                            if (qLower.includes('wastage') || qLower.includes('spillage') || qLower.includes('process loss')) {
+                                const wastageSubtypes = ['spillage', 'expired', 'qc_rejection', 'process_loss', 'cleaning'];
+                                let totals = {};
+                                wastageSubtypes.forEach(s => totals[s] = 0);
+                                (appState.transactions || []).forEach(t => {
+                                    if (t.type === 'consume' && wastageSubtypes.includes(t.subtype)) {
+                                        totals[t.subtype] += (parseFloat(t.quantity) || 0);
+                                    }
+                                });
+                                let html = 'AI:<br><p class="text-xs font-semibold">Wastage Summary (Historical Total Units):</p><ul class="text-xs mt-1">';
+                                wastageSubtypes.forEach(s => {
+                                    if (totals[s] > 0) html += `<li>${s.replace('_', ' ')}: ${totals[s].toFixed(2)}</li>`;
+                                });
+                                html += '</ul>';
+                                appendMessage('assistant', html);
+                                return;
+                            }
+
                             // If not handled above, fall back to AI
                             appendMessage('assistant', '<span class="text-gray-500 text-xs">Thinking...</span>');
+
 
                             // Prepare data summary with smart slicing for dates
                             const allTx = appState.transactions || [];
@@ -4303,8 +4484,17 @@
                             }
 
                             const snapshot = buildAiDataSummaryForQuestion(qTrim, txSlice);
-
                             const providerHint = providerSelect.value === 'auto' ? null : providerSelect.value;
+                            
+                            window._aiRequestInFlight = true;
+                            window._lastAiCallTime = Date.now();
+                            
+                            const askBtn = form.querySelector('button[type="submit"]');
+                            if (askBtn) {
+                                askBtn.disabled = true;
+                                askBtn.innerHTML = '<span class="animate-spin inline-block mr-1">↻</span>';
+                            }
+
                             try {
                                 const result = await callAiWithFallback({
                                     question: qTrim,
@@ -4321,6 +4511,12 @@
                                 console.error('AI error', e);
                                 chatLog.lastChild && chatLog.removeChild(chatLog.lastChild);
                                 appendMessage('assistant', `<span class="text-red-600 text-xs">AI failed: ${(e && e.message) || 'Unknown error'}. Open AI Settings and check keys/quotas.</span>`);
+                            } finally {
+                                window._aiRequestInFlight = false;
+                                if (askBtn) {
+                                    askBtn.disabled = false;
+                                    askBtn.innerHTML = 'Ask';
+                                }
                             }
                         }
 
