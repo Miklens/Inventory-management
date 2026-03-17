@@ -2485,9 +2485,10 @@
         var txs = (payload0 && payload0.transactions) ? payload0.transactions : [];
         if (Array.isArray(txs) && txs.length) {
           // Build standalone dispatch list with edits/reverts applied (effective quantity).
+          // Note: adjustment txs are written by "editedByEmail", not "dispatchedByEmail".
           var owned = function (t) {
-            var byEmail = String(t.dispatchedByEmail || '').toLowerCase().trim();
-            var byName = String(t.dispatchedBy || '').toLowerCase().trim();
+            var byEmail = String(t.dispatchedByEmail || t.editedByEmail || '').toLowerCase().trim();
+            var byName = String(t.dispatchedBy || t.editedBy || '').toLowerCase().trim();
             return (byEmail && byEmail === email) || (byName && name && byName === name) || (byName && byName === email);
           };
 
