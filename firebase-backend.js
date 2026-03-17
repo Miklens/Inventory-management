@@ -1099,6 +1099,7 @@
     var customerId = params.customerId != null ? (typeof params.customerId === 'number' ? params.customerId : parseFloat(params.customerId)) : null;
     var newCustomerName = (params.newCustomerName || '').toString().trim();
     var user = params.user || 'User';
+    var userEmail = (params.email || '').toString().toLowerCase().trim();
     var remarks = (params.remarks || '').toString().trim();
     if (!productName && productId == null) return fail(new Error('Product name or ID required'));
     if (qty <= 0) return fail(new Error('Quantity must be positive'));
@@ -1197,7 +1198,8 @@
       customerName: custName,
       notes: remarks || 'Standalone dispatch from Digital Requisition',
       source: 'digital_requisition',
-      dispatchedBy: user
+      dispatchedBy: user,
+      dispatchedByEmail: userEmail || ''
     });
 
     payload.customers = customers;
@@ -2298,6 +2300,45 @@
       var tb = (b.RequestedAt || b.requestedAt || '').toString();
       return ta > tb ? -1 : ta < tb ? 1 : 0;
     });
+    // Also include standalone "Dispatch from Stock" transactions (these are not stored in RequisitionDispatches).
+    try {
+      var dbSnap = await db.collection('Database').doc('latest').get();
+      if (dbSnap.exists) {
+        var d0 = dbSnap.data() || {};
+        var payload0 = (d0 && d0.data) ? d0.data : d0;
+        var txs = (payload0 && payload0.transactions) ? payload0.transactions : [];
+        if (Array.isArray(txs) && txs.length) {
+          var standalone = txs.filter(function (t) {
+            if (!t) return false;
+            if (String(t.type || '').toLowerCase() !== 'dispatch') return false;
+            if (String(t.source || '').toLowerCase() !== 'digital_requisition') return false;
+            var byEmail = String(t.dispatchedByEmail || '').toLowerCase().trim();
+            var byName = String(t.dispatchedBy || '').toLowerCase().trim();
+            return (byEmail && byEmail === email) || (byName && name && byName === name) || (byName && byName === email);
+          }).map(function (t) {
+            return {
+              DispatchID: 'STD-' + String(t.id || Date.now()),
+              RequestID: '',
+              ProductName: t.itemName || t.productName || '',
+              Quantity: Math.abs(parseFloat(t.quantity || 0) || 0),
+              Unit: t.unit || '',
+              Status: 'APPROVED',
+              RequestedBy: t.dispatchedBy || '',
+              RequestedByEmail: t.dispatchedByEmail || '',
+              RequesterEmail: '',
+              RequestedAt: t.date || '',
+              Remarks: t.notes || ''
+            };
+          });
+          mine = mine.concat(standalone);
+          mine.sort(function (a, b) {
+            var ta2 = (a.RequestedAt || a.requestedAt || '').toString();
+            var tb2 = (b.RequestedAt || b.requestedAt || '').toString();
+            return ta2 > tb2 ? -1 : ta2 < tb2 ? 1 : 0;
+          });
+        }
+      }
+    } catch (e) {}
     return ok({ dispatches: mine });
   }
 
