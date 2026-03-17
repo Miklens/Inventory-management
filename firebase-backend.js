@@ -1506,12 +1506,20 @@
       var actorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
       var actorEmail = (params.email || '').toLowerCase().trim();
       var allowed = await hasRoleAny([actorId, actorEmail], ['Store Incharge', 'Store', 'Manager', 'Admin']);
-      if (!allowed) return fail(new Error('Only Store Incharge, Manager, or Admin can issue or partially issue materials'));
+      if (!allowed) {
+        var r1 = await getUserRoleSafe(actorId);
+        var r2 = actorEmail && actorEmail !== actorId ? await getUserRoleSafe(actorEmail) : '';
+        return fail(new Error('Not authorized to issue. Your role is "' + (r1 || r2 || 'UNKNOWN') + '". Set Role to exactly "Store Incharge" (or Manager/Admin).'));
+      }
     } else if (stageAction === 'RECORD') {
       var recordActorId = adminIdentifier(params) || (params.email || '').toLowerCase().trim();
       var recordActorEmail = (params.email || '').toLowerCase().trim();
       var recordAllowed = await hasRoleAny([recordActorId, recordActorEmail], ['Manager', 'Admin']);
-      if (!recordAllowed) return fail(new Error('Only Manager or Admin can record production'));
+      if (!recordAllowed) {
+        var rr1 = await getUserRoleSafe(recordActorId);
+        var rr2 = recordActorEmail && recordActorEmail !== recordActorId ? await getUserRoleSafe(recordActorEmail) : '';
+        return fail(new Error('Not authorized to record. Your role is "' + (rr1 || rr2 || 'UNKNOWN') + '".'));
+      }
     }
     var docRef = db.collection('Requisitions_V2').doc(String(id).replace(/\//g, '_'));
     var snap = await docRef.get();
@@ -1522,7 +1530,7 @@
       var currentStatus = (data.Status || data.status || '').toUpperCase();
       var currentStage = (data.CurrentStage || data.currentStage || '').toUpperCase();
       var reqType = String(data.Type || data.type || '').toLowerCase().trim();
-      var isResearchReq = reqType === 'research';
+      var isResearchReq = reqType === 'research' || reqType.indexOf('research') >= 0;
 
       // Research requests: Store can issue directly (no manager approval gate).
       // We deduct from inventory and move to WIP immediately.
@@ -1832,6 +1840,10 @@
       } catch (e) { /* ignore */ }
     }
     return false;
+  }
+
+  async function getUserRoleSafe(identifier) {
+    try { return await getUserRole(identifier); } catch (e) { return ''; }
   }
 
   function adminIdentifier(params) {
