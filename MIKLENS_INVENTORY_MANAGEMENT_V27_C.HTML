@@ -6657,7 +6657,14 @@
                         container.innerHTML = `
             <h2 class="text-3xl font-bold mb-6">Formulations & Production</h2>
             <div class="bg-white p-6 rounded-lg shadow mb-8">
-                <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold">Manage Formulas</h3><button onclick="openFormulaModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg">Add New Formula</button></div>
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold">Manage Formulas</h3>
+                    <div class="flex gap-2 items-center">
+                        <button onclick="exportAllFormulas('txt')" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Export Formulas</button>
+                        <button onclick="exportAllFormulas('json')" class="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800">Export JSON</button>
+                        <button onclick="openFormulaModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Add New Formula</button>
+                    </div>
+                </div>
                 <div class="mb-4"><label class="text-sm font-medium">Search Product:</label><input type="text" id="formula-search-filter" placeholder="Search by product name..." class="w-full p-2 border rounded-md"></div>
                 <div class="overflow-x-auto max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b">S.No</th><th class="p-2 border-b text-left">Product</th><th class="p-2 border-b">Output</th><th class="p-2 border-b text-left">Ingredients</th><th class="p-2 border-b">Actions</th></tr></thead><tbody id="formulas-table-body"></tbody></table></div>
             </div>
@@ -6690,6 +6697,61 @@
                                 }
                                 window.pendingFormulaCreateName = null; // Clear flag
                             }, 300);
+                        }
+                    }
+
+                    function exportAllFormulas(format) {
+                        try {
+                            const formulas = (appState.formulas || []).slice();
+                            if (!formulas.length) {
+                                alert('No formulas to export.');
+                                return;
+                            }
+                            // stable order for readability
+                            formulas.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+                            if (String(format || '').toLowerCase() === 'json') {
+                                const json = JSON.stringify({ exportedAt: new Date().toISOString(), formulas }, null, 2);
+                                downloadFile(`miklens_formulas_${getToday()}.json`, json, 'application/json;charset=utf-8;');
+                                return;
+                            }
+
+                            let out = '';
+                            out += 'MIKLENS FORMULAS EXPORT\n';
+                            out += 'Exported at: ' + new Date().toLocaleString() + '\n';
+                            out += 'Total formulas: ' + formulas.length + '\n';
+                            out += '============================================================\n\n';
+
+                            formulas.forEach((f, idx) => {
+                                const name = (f.name || f.productName || 'Unnamed').toString();
+                                const outputQty = (f.outputQty != null ? f.outputQty : '').toString();
+                                const outputUnit = (f.outputUnit || '').toString();
+                                out += `${idx + 1}. ${name}\n`;
+                                if (outputQty || outputUnit) out += `Output: ${outputQty} ${outputUnit}`.trim() + '\n';
+                                if (f.formulaBasis) out += `Basis: ${String(f.formulaBasis)}\n`;
+                                if (f.notes) out += `Notes: ${String(f.notes)}\n`;
+                                out += 'Ingredients:\n';
+                                const ings = Array.isArray(f.ingredients) ? f.ingredients : [];
+                                if (!ings.length) {
+                                    out += '  - (none)\n\n';
+                                    return;
+                                }
+                                ings.forEach((ing) => {
+                                    const cat = (ing.category || '').toString();
+                                    const itemId = ing.itemId != null ? ing.itemId : ing.id;
+                                    const item = (typeof findItem === 'function') ? findItem(cat, itemId) : null;
+                                    const itemName = item ? (item.name || 'Unknown') : (ing.itemName || ing.name || String(itemId || 'Unknown'));
+                                    const unit = item ? (item.unit || '') : (ing.unit || '');
+                                    const qty = (ing.quantity != null) ? Number(ing.quantity) : Number(ing.qty || 0);
+                                    out += `  - ${isNaN(qty) ? (ing.quantity || '') : qty.toFixed(4)} ${unit}  ${itemName}  [${cat}]\n`;
+                                });
+                                out += '\n';
+                            });
+
+                            downloadFile(`miklens_formulas_${getToday()}.txt`, out, 'text/plain;charset=utf-8;');
+                        } catch (e) {
+                            console.error(e);
+                            alert('Export failed: ' + (e.message || e));
                         }
                     }
 
