@@ -256,6 +256,25 @@
       ];
       to = (payload.requesterEmail || '').trim();
       subject = '[MIKLENS REQ-' + (payload.requestId || '') + '] Dispatch Approved';
+    } else if (type === 'dispatch_correction_requested') {
+      eventTitle = 'Dispatch Change Requested';
+      title = 'Dispatch Correction Needed';
+      color = STATUS_COLORS.WARNING;
+      details = [
+        { label: 'Dispatch ID', value: payload.dispatchId || '' },
+        { label: 'Request ID', value: payload.requestId || '— (Direct from stock)' },
+        { label: 'Product', value: payload.productName || '' },
+        { label: 'Current Qty', value: (payload.currentQty != null ? payload.currentQty : '—') + ' ' + (payload.unit || '') },
+        { label: 'Requested Qty', value: (payload.newQuantity != null ? payload.newQuantity : '—') + ' ' + (payload.unit || '') },
+        { label: 'Current Remarks', value: payload.currentRemarks || '—' },
+        { label: 'Requested Remarks', value: payload.newRemarks || '—' },
+        { label: 'Requested by', value: (payload.requestedByName || '') + (payload.requestedByEmail ? ' (' + payload.requestedByEmail + ')' : '') },
+        { label: 'Reason', value: payload.reason || '—' },
+        { label: 'Action', value: 'Please review and adjust inventory/records manually if needed.' }
+      ];
+      var managersDcr = await getManagerAdminEmails();
+      to = managersDcr.length ? managersDcr.join(',') : '';
+      subject = '[MIKLENS DISPATCH-' + (payload.dispatchId || '') + '] Change Requested – ' + (payload.productName || '');
     } else if (type === 'standalone_dispatch_completed') {
       eventTitle = 'Dispatch from Stock Completed';
       title = 'Standalone Dispatch Recorded';
@@ -1223,6 +1242,120 @@
       });
     } catch (e) { console.warn('standalone_dispatch_completed email failed:', e); }
     return ok({ message: 'Dispatch recorded. Main Inventory updated.', customerName: custName });
+  }
+
+  /** Edit standalone dispatch-from-stock by appending an adjustment transaction (reverts/consumes delta). */
+  async function editStandaloneDispatch(params) {
+    var sourceTxIdRaw = params.sourceTxId || params.txId || params.id || '';
+    var sourceTxId = (typeof sourceTxIdRaw === 'number') ? sourceTxIdRaw : parseFloat(String(sourceTxIdRaw).replace(/^STD-/, ''));
+    var newQty = parseFloat(params.newQuantity != null ? params.newQuantity : params.quantity);
+    var newRemarks = (params.newRemarks != null ? params.newRemarks : params.remarks) || '';
+    var reason = (params.reason || '').toString().trim();
+    var actorEmail = (params.email || '').toLowerCase().trim();
+    var actorName = (params.user || params.name || actorEmail || '').toString().trim();
+    if (!actorEmail) return fail(new Error('Email required'));
+    if (!(newQty > 0)) return fail(new Error('Valid newQuantity required'));
+    if (!reason) return fail(new Error('Reason required'));
+    if (!sourceTxId) return fail(new Error('sourceTxId required'));
+
+    var latestRef = db.collection('Database').doc('latest');
+    var snap = await latestRef.get();
+    if (!snap.exists) return fail(new Error('No inventory data'));
+    var d = snap.data();
+    var currentVersion = (d.latestId || '').toString();
+    var payload = (d && d.data) ? d.data : d;
+    var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    if (!payload || typeof payload !== 'object') return fail(new Error('Invalid inventory structure'));
+    if (!inv || typeof inv !== 'object') return fail(new Error('Inventory structure not found'));
+    var transactions = payload.transactions || [];
+    if (!Array.isArray(transactions)) transactions = [];
+
+    // Find original standalone dispatch tx.
+    var src = null;
+    for (var i = 0; i < transactions.length; i++) {
+      var t = transactions[i];
+      if (!t) continue;
+      if (String(t.type || '').toLowerCase() !== 'dispatch') continue;
+      if (String(t.source || '').toLowerCase() !== 'digital_requisition') continue;
+      if (parseFloat(t.id) === sourceTxId) { src = t; break; }
+    }
+    if (!src) return fail(new Error('Standalone dispatch transaction not found'));
+
+    // Permission: dispatcher (email) or Manager/Admin.
+    var srcEmail = String(src.dispatchedByEmail || '').toLowerCase().trim();
+    var srcName = String(src.dispatchedBy || '').toLowerCase().trim();
+    var isAdmin = await hasRoleAny([adminIdentifier(params) || actorEmail, actorEmail], ['Manager', 'Admin']);
+    if (!isAdmin && !((srcEmail && srcEmail === actorEmail) || (srcName && actorName && srcName === actorName.toLowerCase()))) {
+      return fail(new Error('You can edit only your own direct dispatch'));
+    }
+
+    var oldQty = Math.abs(parseFloat(src.quantity || 0) || 0);
+    var delta = newQty - oldQty;
+    if (Math.abs(delta) < 1e-9) return ok({ message: 'No change' });
+
+    // Ensure stock available if increasing dispatch.
+    if (delta > 0) {
+      var fgArr = (inv.finishedGoods || inv.products || []);
+      if (!Array.isArray(fgArr)) fgArr = [];
+      var itemId = src.itemId;
+      var matchedItem = null;
+      for (var j = 0; j < fgArr.length; j++) {
+        if (fgArr[j] && (fgArr[j].id == itemId || fgArr[j].id === itemId)) { matchedItem = fgArr[j]; break; }
+      }
+      if (!matchedItem) {
+        // fall back to name
+        var nm = String(src.itemName || '').toLowerCase();
+        for (var k = 0; k < fgArr.length; k++) {
+          if (String(fgArr[k].name || fgArr[k].itemName || '').toLowerCase() === nm) { matchedItem = fgArr[k]; break; }
+        }
+      }
+      if (!matchedItem) return fail(new Error('Product not found in inventory for adjustment'));
+      var available = calculateFGStock(matchedItem, transactions);
+      if (available < delta) return fail(new Error('Insufficient stock to increase dispatch. Available: ' + available.toFixed(3) + ', needed: ' + delta.toFixed(3)));
+    }
+
+    var nowIso = new Date().toISOString();
+    var dateStr = nowIso.split('T')[0] + 'T00:00:00.000Z';
+    transactions.push({
+      id: Date.now(),
+      itemId: src.itemId,
+      itemName: src.itemName,
+      category: 'finishedGoods',
+      type: 'dispatch_edit_adjustment',
+      quantity: -delta, // delta>0 means consume more => negative; delta<0 means return stock => positive
+      date: dateStr,
+      source: 'digital_requisition',
+      originalDispatchTxId: sourceTxId,
+      notes: 'Edit direct dispatch. Reason: ' + reason + (newRemarks ? ('. Remarks: ' + newRemarks) : ''),
+      editedBy: actorName,
+      editedByEmail: actorEmail
+    });
+    payload.transactions = transactions;
+
+    var saveResult = await saveInventory(payload, currentVersion);
+    if (saveResult.result === 'error' && saveResult.code === 'CONFLICT') {
+      return fail(new Error('Inventory changed by someone else. Sync and retry.'));
+    }
+    if (saveResult.result !== 'success' && saveResult.status !== 'success') {
+      return fail(new Error(saveResult.error || 'Edit failed'));
+    }
+    await auditLog('standalone_dispatch_edit', actorEmail, { sourceTxId: sourceTxId, oldQty: oldQty, newQty: newQty, delta: delta });
+    try {
+      await pushNotificationQueue('dispatch_correction_requested', {
+        dispatchId: 'STD-' + String(sourceTxId),
+        requestId: '',
+        productName: src.itemName || '',
+        unit: src.unit || '',
+        currentQty: oldQty,
+        currentRemarks: src.notes || '',
+        newQuantity: newQty,
+        newRemarks: String(newRemarks || ''),
+        requestedByEmail: actorEmail,
+        requestedByName: actorName,
+        reason: reason
+      });
+    } catch (e) {}
+    return ok({ message: 'Direct dispatch updated and stock adjusted' });
   }
 
   /** Release reservations older than X hours (optional auto-release). Resets requisition to Awaiting Material Issue so Store can re-issue. */
@@ -2318,6 +2451,7 @@
           }).map(function (t) {
             return {
               DispatchID: 'STD-' + String(t.id || Date.now()),
+              SourceTxId: t.id || '',
               RequestID: '',
               ProductName: t.itemName || t.productName || '',
               Quantity: Math.abs(parseFloat(t.quantity || 0) || 0),
@@ -2403,6 +2537,58 @@
       CancelledBy: params.user || actorEmail || ''
     });
     return ok({ message: 'Dispatch cancelled' });
+  }
+
+  async function requestDispatchCorrection(params) {
+    var dispatchId = (params.dispatchId || params.id || '').toString().trim();
+    if (!dispatchId) return fail(new Error('Dispatch ID required'));
+    var actorEmail = (params.email || '').toLowerCase().trim();
+    var actorName = (params.user || params.name || actorEmail || '').toString().trim();
+    var reason = (params.reason || '').toString().trim();
+    var newQty = params.newQuantity != null ? parseFloat(params.newQuantity) : NaN;
+    var newRemarks = (params.newRemarks || '').toString();
+    var productName = (params.productName || '').toString();
+    var unit = (params.unit || '').toString();
+    var currentQty = params.currentQty != null ? parseFloat(params.currentQty) : null;
+    var currentRemarks = (params.currentRemarks || '').toString();
+    var requestId = (params.requestId || '').toString().trim();
+    if (!actorEmail) return fail(new Error('Email required'));
+    if (!reason) return fail(new Error('Reason required'));
+
+    var correctionId = 'DCR-' + Date.now();
+    await db.collection('DispatchCorrections').doc(correctionId).set({
+      id: correctionId,
+      dispatchId: dispatchId,
+      requestId: requestId || '',
+      productName: productName || '',
+      unit: unit || '',
+      currentQty: (currentQty != null && currentQty === currentQty ? currentQty : null),
+      currentRemarks: currentRemarks || '',
+      requestedByEmail: actorEmail,
+      requestedByName: actorName,
+      reason: reason,
+      newQuantity: (newQty > 0 ? newQty : null),
+      newRemarks: newRemarks,
+      status: 'PENDING',
+      createdAt: new Date().toISOString()
+    });
+    await auditLog('dispatch_correction_request', actorEmail, { dispatchId: dispatchId, newQuantity: (newQty > 0 ? newQty : null) });
+    try {
+      await pushNotificationQueue('dispatch_correction_requested', {
+        dispatchId: dispatchId,
+        requestId: requestId || '',
+        productName: productName || '',
+        unit: unit || '',
+        currentQty: (currentQty != null && currentQty === currentQty ? currentQty : null),
+        currentRemarks: currentRemarks || '',
+        newQuantity: (newQty > 0 ? newQty : null),
+        newRemarks: newRemarks,
+        requestedByEmail: actorEmail,
+        requestedByName: actorName,
+        reason: reason
+      });
+    } catch (e) { console.warn('dispatch_correction_requested email failed:', e); }
+    return ok({ message: 'Correction request submitted' });
   }
 
   // Debug helper (read-only): returns a small sample of dispatch docs and field names.
@@ -2901,10 +3087,12 @@
     request_dispatch: requestDispatch,
     edit_dispatch: editDispatch,
     cancel_dispatch: cancelDispatch,
+    request_dispatch_correction: requestDispatchCorrection,
     debug_dispatch_sample: debugDispatchSample,
     approve_dispatch: approveDispatch,
     get_inventory_for_standalone_dispatch: getInventoryForStandaloneDispatch,
     standalone_dispatch_from_stock: standaloneDispatchFromStock,
+    edit_standalone_dispatch: editStandaloneDispatch,
     confirm_formula: confirmFormula,
     request_correction: requestCorrection,
     update_request_packing_labels: updateRequestPackingLabels,
