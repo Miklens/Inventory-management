@@ -3773,9 +3773,10 @@
                                 },
                                 groq: {
                                     models: [
-                                        { id: 'groq-llama-4-scout', name: 'Groq LLaMA 4 Scout', apiModel: 'llama-3.1-70b-versatile', enabled: true, keys: [], lastKeyIndex: 0 }
+                                        { id: 'groq-llama-4-scout', name: 'Groq LLaMA 4 Scout', apiModel: 'llama-4-scout', enabled: true, keys: [], lastKeyIndex: 0 },
+                                        { id: 'groq-llama-3.3-70b', name: 'Groq LLaMA 3.3 70B', apiModel: 'llama-3.3-70b-versatile', enabled: true, keys: [], lastKeyIndex: 0 }
                                     ],
-                                    modelFallbackOrder: ['groq-llama-4-scout'],
+                                    modelFallbackOrder: ['groq-llama-4-scout', 'groq-llama-3.3-70b'],
                                     preferredModel: 'groq-llama-4-scout'
                                 }
                             },
@@ -3833,7 +3834,7 @@
                     async function callGroqModel(model, apiKey, promptText) {
                         const url = 'https://api.groq.com/openai/v1/chat/completions';
                         const body = {
-                            model: model.apiModel || 'llama-4-Scout',
+                            model: model.apiModel || 'llama-4-scout',
                             messages: [
                                 { role: 'system', content: 'You are an inventory analyst. Answer using only the provided Miklens inventory data summary. Be concise and numeric where possible.' },
                                 { role: 'user', content: promptText }
@@ -4177,7 +4178,9 @@
                                 if (!t.date || isNaN(new Date(t.date).getTime())) return;
                                 const tDate = new Date(t.date);
                                 const monthKey = t.date.slice(0, 7); // YYYY-MM
-                                const qty = parseFloat(t.quantity) || 0;
+                                const qty = Math.abs(parseFloat(t.quantity)) || 0; // Use Math.abs to fix negative dispatch entries
+                                if (qty === 0) return; // Skip zero entries
+                                
                                 const type = (t.type || '').toLowerCase();
                                 const subtype = (t.subtype || '').toLowerCase();
                                 const itemName = t.itemName || 'Unknown';
@@ -4203,13 +4206,16 @@
                                     aggregations.wastageSummary.total += qty;
                                 }
 
-                                // Customer aggregates
-                                if (type === 'dispatch' && t.customerName) {
-                                    const c = t.customerName;
-                                    if (!aggregations.customerDispatch[c]) aggregations.customerDispatch[c] = { qty: 0, value: 0 };
-                                    aggregations.customerDispatch[c].qty += qty;
-                                    const cost = findItemCost(itemName, t.category);
-                                    aggregations.customerDispatch[c].value += (qty * cost);
+                                // Customer aggregates (Expand field mapping to fix missing customers)
+                                if (type === 'dispatch') {
+                                    const c = t.customerName || t.customer || t.customerId || null;
+                                    if (c && c !== 'null') {
+                                        const cName = String(c);
+                                        if (!aggregations.customerDispatch[cName]) aggregations.customerDispatch[cName] = { qty: 0, value: 0 };
+                                        aggregations.customerDispatch[cName].qty += qty;
+                                        const cost = findItemCost(itemName, t.category);
+                                        aggregations.customerDispatch[cName].value += (qty * cost);
+                                    }
                                 }
 
                                 // Supplier aggregates
