@@ -2264,12 +2264,33 @@
     var name = (params.name || params.requestedByName || '').toLowerCase().trim();
     if (!email) return fail(new Error('Email required'));
     var all = await getCollectionArray('RequisitionDispatches');
+    // Also include dispatches linked to the user's requisitions (legacy dispatch docs may not store RequesterEmail/RequestedByEmail).
+    var myReqIds = {};
+    try {
+      var reqs = await getCollectionArray('Requisitions_V2');
+      try {
+        var legacyReqs = await getCollectionArray('Requisitions');
+        if (Array.isArray(legacyReqs) && legacyReqs.length) reqs = reqs.concat(legacyReqs);
+      } catch (e) {}
+      reqs.forEach(function (r) {
+        var re = (r.EmployeeEm || r.requesterEmail || r.EmployeeEmail || r.email || '').toLowerCase().trim();
+        if (re && re === email) {
+          var rid = (r.RequestID || r.id || r._id || '').toString().trim();
+          if (rid) myReqIds[rid] = true;
+        }
+      });
+    } catch (e) {}
+
     var mine = all.filter(function (d) {
       var e = (d.RequestedByEmail || d.requestedByEmail || '').toLowerCase().trim();
       var by = (d.RequestedBy || d.requestedBy || '').toLowerCase().trim();
       var reqE = (d.RequesterEmail || d.requesterEmail || '').toLowerCase().trim();
+      var rid = (d.RequestID || d.requestId || '').toString().trim();
       // Legacy dispatches may store only name (RequestedBy) without email.
-      return (reqE && reqE === email) || (e && e === email) || (by && (by === email || (name && by === name)));
+      return (reqE && reqE === email) ||
+        (e && e === email) ||
+        (by && (by === email || (name && by === name))) ||
+        (rid && myReqIds[rid] === true);
     });
     // newest first
     mine.sort(function (a, b) {
