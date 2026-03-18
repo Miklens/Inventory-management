@@ -9019,6 +9019,8 @@
                         }
                         openModal('supplierModal');
                     }
+                    // Ensure inline onclick handlers can access this function
+                    window.openSupplierModal = openSupplierModal;
 
                     function deleteSupplier(id) {
                         if (!checkPermission()) return;
