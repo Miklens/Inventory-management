@@ -682,6 +682,76 @@
     });
   }
 
+  async function syncUsersToAppsScriptDirectory(force, currentUser) {
+    var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
+    var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
+    if (!db || !url || !secret) return false;
+
+    var canUseStorage = typeof global.localStorage !== 'undefined';
+    var now = Date.now();
+
+    var role = String((currentUser && (currentUser.role || currentUser.Role)) || '').toLowerCase().trim();
+    var isPrivileged = (role === 'admin' || role === 'manager' || role.indexOf('admin') >= 0 || role.indexOf('manager') >= 0);
+
+    // All users: only admin/manager can read all Users — throttle to once per 6h.
+    if (isPrivileged) {
+      var syncKey = 'miklens_recipients_sync_at';
+      if (!force && canUseStorage) {
+        var last = parseInt(global.localStorage.getItem(syncKey) || '0', 10) || 0;
+        if (now - last < (6 * 60 * 60 * 1000)) return false;
+      }
+      try {
+        var snap = await db.collection('Users').get();
+        var users = [];
+        snap.forEach(function (doc) {
+          var d = doc.data() || {};
+          var email = String(d.Email || d.email || '').trim().toLowerCase();
+          if (!email || email.indexOf('@') < 0) return;
+          users.push({
+            email: email,
+            name: String(d.Name || d.name || '').trim(),
+            role: String(d.Role || d.role || '').trim()
+          });
+        });
+        if (!users.length) return false;
+        var body = JSON.stringify({ secret: secret, action: 'sync_recipients', users: users });
+        var resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: body,
+          redirect: 'follow'
+        });
+        if (!resp.ok) return false;
+        if (canUseStorage) global.localStorage.setItem(syncKey, String(now));
+        return true;
+      } catch (e) {
+        console.warn('syncUsersToAppsScriptDirectory (all) failed', e);
+        return false;
+      }
+    }
+
+    // Non-privileged user: sync only their own record so they appear in UserDirectory.
+    if (!currentUser || !currentUser.email) return false;
+    try {
+      var singleUser = [{
+        email: String(currentUser.email).toLowerCase().trim(),
+        name: String(currentUser.name || '').trim(),
+        role: String(currentUser.role || '').trim()
+      }];
+      var singleBody = JSON.stringify({ secret: secret, action: 'sync_recipients', users: singleUser });
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: singleBody,
+        redirect: 'follow'
+      });
+      return true;
+    } catch (e) {
+      console.warn('syncUsersToAppsScriptDirectory (self) failed', e);
+      return false;
+    }
+  }
+
   /** Optional: push to NotificationQueue for in-app notifications; if Apps Script URL is set, also send email for free. */
   async function pushNotificationQueue(type, data) {
     if (!db) return;
@@ -744,8 +814,12 @@
     if (!auth || !auth.currentUser) return fail(new Error('Not signed in'));
     var uid = auth.currentUser.uid;
     var snap = await db.collection('Users').doc(uid).get();
+    if (!snap.exists && auth.currentUser.email) {
+      snap = await db.collection('Users').doc(String(auth.currentUser.email).toLowerCase().trim().replace(/\//g, '_')).get();
+    }
     if (!snap.exists) return fail(new Error('Not on the approve list'));
     var u = snap.data();
+    syncUsersToAppsScriptDirectory(false).catch(function () {});
     return ok({
       user: { uid: uid, email: u.Email || auth.currentUser.email || '', name: u.Name || '', role: u.Role || '', department: u.Department || '' }
     });
@@ -3346,6 +3420,10 @@
       backendConfig = config && typeof config === 'object' ? config : {};
       var app = global.firebase.initializeApp(config);
       db = global.firebase.firestore();
+      // Keep reminder recipients synced from Firebase Users automatically.
+      setTimeout(function () {
+        syncUsersToAppsScriptDirectory(false).catch(function () {});
+      }, 1200);
       return true;
     } catch (e) {
       console.error('Firebase init failed', e);
