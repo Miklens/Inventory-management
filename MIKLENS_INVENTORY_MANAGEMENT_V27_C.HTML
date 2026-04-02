@@ -171,6 +171,70 @@
         }
     };
 
+    // Global supplier modal opener with diagnostics so Add Supplier works from any view.
+    window.openSupplierModalFromAnywhere = function (source, id) {
+        try {
+            console.log('[SupplierDebug] openSupplierModalFromAnywhere', {
+                source: source || 'unknown',
+                id: id || null,
+                hasInvoke: typeof window.invokeOpenSupplierModal,
+                hasOpenSupplierModal: typeof window.openSupplierModal,
+                role: (window.currentUserRole || null)
+            });
+        } catch (e) { }
+
+        try {
+            if (typeof window.invokeOpenSupplierModal === 'function') {
+                window.invokeOpenSupplierModal(id || null);
+                return true;
+            }
+            if (typeof window.openSupplierModal === 'function') {
+                window.openSupplierModal(id || null);
+                return true;
+            }
+        } catch (err) {
+            console.warn('[SupplierDebug] primary supplier opener failed, using modal fallback', err);
+        }
+
+        const modal = document.getElementById('supplierModal');
+        if (!modal) {
+            console.error('[SupplierDebug] supplierModal not found in DOM');
+            if (typeof window.showAlert === 'function') {
+                window.showAlert('Supplier modal not found. Please refresh and try again.', 'Error');
+            }
+            return false;
+        }
+
+        const form = document.getElementById('supplier-form');
+        if (form) form.reset();
+        const title = document.getElementById('supplier-modal-title');
+        if (title) title.textContent = id ? 'Edit Supplier' : 'Add Supplier';
+
+        if (typeof window.openModal === 'function') {
+            window.openModal('supplierModal');
+        } else {
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        return true;
+    };
+
+    // Capture clicks before inline handlers so we can diagnose and guarantee Supplier modal opens.
+    document.addEventListener('click', function supplierModalDelegatedClick(e) {
+        var trigger = e && e.target && e.target.closest
+            ? e.target.closest('[data-open-supplier-modal="1"], #grn-add-supplier-btn')
+            : null;
+        if (!trigger) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        window.openSupplierModalFromAnywhere(
+            trigger.id || trigger.getAttribute('title') || 'delegated-trigger',
+            null
+        );
+    }, true);
+
     document.addEventListener('click', function requestDetailsCloseDelegated(e) {
         var t = e.target;
         if (t && (t.id === 'requestDetailsModalClose' || (t.closest && t.closest('#requestDetailsModalClose')))) {
@@ -531,7 +595,7 @@
     </div>
 
     <!-- Modals -->
-    <div id="addItemModal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+        <div id="addItemModal" class="modal hidden fixed inset-0 bg-black bg-opacity-50 justify-center items-center" style="z-index: 999997 !important;">
         <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="item-modal-title" class="text-xl font-bold">Add New Item</h3>
@@ -580,6 +644,13 @@
                     <label for="item-min-stock-level" class="block text-sm font-medium">Minimum Stock Level</label>
                     <input type="number" id="item-min-stock-level" step="0.001" class="w-full p-2 border rounded-md"
                         value="0">
+                </div>
+                <div id="formula-link-container" class="mb-4 hidden">
+                    <label for="item-linked-formula" class="block text-sm font-medium">Linked Formula (for Fetch Cost)</label>
+                    <select id="item-linked-formula" class="w-full p-2 border rounded-md">
+                        <option value="">Auto match by name (no manual link)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Use this when Finished Good name is different from formula name.</p>
                 </div>
                 <div class="flex justify-between items-center">
                     <button type="button" id="delete-item-btn"
@@ -640,7 +711,7 @@
                             <label class="block text-xs font-medium">Supplier</label>
                             <div class="flex gap-1">
                                 <select id="tx-supplier" class="w-full p-1 border rounded text-sm"></select>
-                                <button type="button" onclick="openSupplierModal()"
+                                <button type="button" data-open-supplier-modal="1" onclick="window.invokeOpenSupplierModal && window.invokeOpenSupplierModal()"
                                     class="bg-green-600 text-white px-2 rounded font-bold"
                                     title="Add New Supplier">+</button>
                             </div>
@@ -908,7 +979,7 @@
     </div>
 
     <!-- Generic Message/Confirmation Modal -->
-    <div id="genericMessageModal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+        <div id="genericMessageModal" class="modal hidden fixed inset-0 bg-black bg-opacity-50 justify-center items-center" style="z-index: 1000005 !important;">
         <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="generic-modal-title" class="text-xl font-bold"></h3>
@@ -978,7 +1049,7 @@
             <p class="text-sm text-gray-600 mb-4">Connect to Google Sheets to enable multi-user access.</p>
 
             <div class="mb-4">
-                <label class="block text-sm font-medium mb-1">Google Apps Script Web App URL</label>
+                <label class="block text-sm font-medium mb-1">Legacy Cloud URL (unused in Firebase mode)</label>
                 <input type="text" id="cloud-api-url" class="w-full p-2 border rounded-md"
                     placeholder="https://script.google.com/macros/s/...">
                 <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded p-2 mt-2">Use the <strong>same</strong> URL as in the <strong>Digital Requisition App</strong> (Settings) so dispatches and stock stay in sync.</p>
@@ -1009,7 +1080,7 @@
     </div>
 
     <!-- Customer Modal -->
-    <div id="customerModal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+        <div id="customerModal" class="modal hidden fixed inset-0 bg-black bg-opacity-50 justify-center items-center" style="z-index: 999998 !important;">
         <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold">Add/Edit Customer</h3>
@@ -1375,7 +1446,10 @@
             </div>
 
             <div class="flex justify-end gap-4">
-                <button type="button" onclick="closeModal('wipPauseModal')" </div>
+                <button type="button" onclick="closeModal('wipPauseModal')"
+                    class="px-4 py-2 bg-gray-300 rounded-lg">Cancel</button>
+                <button type="button" onclick="confirmPauseProduction()"
+                    class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700">Pause Production</button>
             </div>
 
             <!-- Consume Requisition Modal -->
@@ -1607,7 +1681,10 @@
                             if (!authUser) throw new Error('Login failed. Please try again.');
                             var db = firebase.firestore();
                             var snap = await db.collection('Users').doc(authUser.uid).get();
-                            if (!snap.exists) throw new Error('Not authorized. Ask admin to add your user profile in Firestore.');
+                            if (!snap.exists && authUser.email) {
+                                snap = await db.collection('Users').doc(String(authUser.email).toLowerCase().trim().replace(/\//g, '_')).get();
+                            }
+                            if (!snap.exists) throw new Error('Not authorized. Ask admin to add your Firebase user profile in Firestore.');
                             var profile = snap.data() || {};
                             var user = {
                                 email: profile.Email || authUser.email || email,
@@ -1890,11 +1967,10 @@
                 };
 
                 async function requisitionCall(action, params) {
-                    if (useFirebase && window.FirebaseBackend) return await window.FirebaseBackend.callBackend(action, params || {});
-                    var url = localStorage.getItem('inventoryCloudUrl') || localStorage.getItem('cloud-api-url') || localStorage.getItem('GAS_URL') || localStorage.getItem('GAS_REQ_URL');
-                    if (!url) return { result: 'error', error: 'Cloud not configured' };
-                    var res = await fetch(url + '?action=' + action + '&' + new URLSearchParams(params || {}).toString());
-                    return res.json().catch(function() { return { result: 'error', error: 'Invalid response' }; });
+                    if (useFirebase && window.FirebaseBackend) {
+                        return window.FirebaseBackend.callBackend(action, params || {});
+                    }
+                    return { result: 'error', error: 'Firebase requisition backend is not available' };
                 }
                 let saveTimeout = null;
                 let isSyncing = false;
@@ -2160,7 +2236,7 @@
                         // No URL: test Firebase from firebase-config.js
                         var config = typeof window.FIREBASE_CONFIG !== 'undefined' ? window.FIREBASE_CONFIG : null;
                         if (!config || !config.apiKey || !config.projectId || config.apiKey === 'YOUR_API_KEY') {
-                            alert("Enter a Google Apps Script Web App URL above, or add firebase-config.js with your Firebase config to use Firebase.");
+                            alert("Add firebase-config.js with your Firebase config to use the Firebase backend. Legacy cloud URL is not used in Firebase mode.");
                             return;
                         }
                         if (!window.FirebaseBackend) {
@@ -2589,6 +2665,7 @@
                         document.getElementById('password-form').addEventListener('submit', handlePasswordSubmit);
                         document.getElementById('adjust-stock-form').addEventListener('submit', handleStockAdjustment);
                         document.getElementById('item-category').addEventListener('change', toggleExpiryDateField);
+                        document.getElementById('item-category').addEventListener('change', toggleFormulaLinkField);
                     }
 
                     // --- UTILITY FUNCTIONS ---
@@ -5851,7 +5928,7 @@
                         <label class="block text-sm font-medium mb-1">Supplier</label>
                         <div class="flex gap-2">
                             <select id="grn-supplier" class="flex-1 p-2 border rounded-md">${supplierOptions}</select>
-                            <button type="button" onclick="window.openSupplierModal && window.openSupplierModal()" class="px-3 py-2 bg-green-600 text-white rounded-md text-sm font-bold hover:bg-green-700 whitespace-nowrap" title="Add New Supplier">+ New</button>
+                            <button type="button" id="grn-add-supplier-btn" class="px-3 py-2 bg-green-600 text-white rounded-md text-sm font-bold hover:bg-green-700 whitespace-nowrap" title="Add New Supplier">+ New</button>
                         </div>
                     </div>
                     <div>
@@ -5870,7 +5947,7 @@
                             <th class="p-2 border-b w-20"></th>
                         </tr></thead>
                         <tbody id="grn-lines-tbody">
-                            <tr class="grn-line-row"><td class="p-2 border-b"><div class="flex gap-2 items-center"><select class="grn-item flex-1 p-1 border rounded" data-row="0">${itemOptions ? itemOptions : '<option value="">-- No items --</option>'}</select><button type="button" onclick="openAddItemModal('rawMaterials')" class="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 whitespace-nowrap" title="Add New Item">+ New</button></div></td><td class="p-2 border-b"><input type="number" step="0.001" min="0" class="grn-qty w-24 p-1 border rounded text-right" value="0"></td><td class="p-2 border-b"><input type="text" class="grn-batch w-full p-1 border rounded" placeholder="Batch"></td><td class="p-2 border-b"><input type="date" class="grn-expiry w-full p-1 border rounded"></td><td class="p-2 border-b"><input type="number" step="0.01" min="0" class="grn-price w-24 p-1 border rounded text-right" placeholder="0"></td><td class="p-2 border-b"><button type="button" onclick="window.removeGRNLine(this)" class="text-red-600 hover:text-red-800 text-sm">Remove</button></td></tr>
+                            <tr class="grn-line-row"><td class="p-2 border-b"><div class="flex gap-2 items-center"><select class="grn-item flex-1 p-1 border rounded" data-row="0">${itemOptions ? itemOptions : '<option value="">-- No items --</option>'}</select><button type="button" onclick="window.openAddItemModal && window.openAddItemModal('rawMaterials')" class="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 whitespace-nowrap" title="Add New Item">+ New</button></div></td><td class="p-2 border-b"><input type="number" step="0.001" min="0" class="grn-qty w-24 p-1 border rounded text-right" value="0"></td><td class="p-2 border-b"><input type="text" class="grn-batch w-full p-1 border rounded" placeholder="Batch"></td><td class="p-2 border-b"><input type="date" class="grn-expiry w-full p-1 border rounded"></td><td class="p-2 border-b"><input type="number" step="0.01" min="0" class="grn-price w-24 p-1 border rounded text-right" placeholder="0"></td><td class="p-2 border-b"><button type="button" onclick="window.removeGRNLine(this)" class="text-red-600 hover:text-red-800 text-sm">Remove</button></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -5880,13 +5957,43 @@
                 </div>
             </div>
                         `;
+                        var grnSupBtn = document.getElementById('grn-add-supplier-btn');
+                        if (grnSupBtn) {
+                            grnSupBtn.addEventListener('click', function (e) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                try {
+                                    console.log('[GRN] +New Supplier clicked', {
+                                        currentUserRole: currentUserRole,
+                                        typeofOpenSupplierModal: (typeof window.openSupplierModal)
+                                    });
+                                } catch (err) {
+                                    console.warn('[GRN] +New Supplier click logging failed', err);
+                                }
+                                if (typeof window.invokeOpenSupplierModal === 'function') {
+                                    window.invokeOpenSupplierModal();
+                                    return;
+                                }
+                                if (typeof window.openSupplierModal === 'function') {
+                                    window.openSupplierModal();
+                                    return;
+                                }
+                                if (typeof openSupplierModal === 'function') {
+                                    openSupplierModal();
+                                    return;
+                                }
+                                if (typeof showAlert === 'function') {
+                                    showAlert('Add Supplier action is unavailable (app script not fully loaded). Please refresh the page.', 'Error');
+                                }
+                            }, true);
+                        }
                         window.addGRNLine = function() {
                             grnLineIndex++;
                             var tbody = document.getElementById('grn-lines-tbody');
                             if (!tbody) return;
                             var row = document.createElement('tr');
                             row.className = 'grn-line-row';
-                            row.innerHTML = '<td class="p-2 border-b"><div class="flex gap-2 items-center"><select class="grn-item flex-1 p-1 border rounded" data-row="' + grnLineIndex + '">' + (itemOptions || '<option value="">-- No items --</option>') + '</select><button type="button" onclick="openAddItemModal(\\\'rawMaterials\\\')" class="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 whitespace-nowrap" title="Add New Item">+ New</button></div></td><td class="p-2 border-b"><input type="number" step="0.001" min="0" class="grn-qty w-24 p-1 border rounded text-right" value="0"></td><td class="p-2 border-b"><input type="text" class="grn-batch w-full p-1 border rounded" placeholder="Batch"></td><td class="p-2 border-b"><input type="date" class="grn-expiry w-full p-1 border rounded"></td><td class="p-2 border-b"><input type="number" step="0.01" min="0" class="grn-price w-24 p-1 border rounded text-right" placeholder="0"></td><td class="p-2 border-b"><button type="button" onclick="window.removeGRNLine(this)" class="text-red-600 hover:text-red-800 text-sm">Remove</button></td>';
+                            row.innerHTML = '<td class="p-2 border-b"><div class="flex gap-2 items-center"><select class="grn-item flex-1 p-1 border rounded" data-row="' + grnLineIndex + '">' + (itemOptions || '<option value="">-- No items --</option>') + '</select><button type="button" onclick="window.openAddItemModal && window.openAddItemModal(\\\'rawMaterials\\\')" class="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 whitespace-nowrap" title="Add New Item">+ New</button></div></td><td class="p-2 border-b"><input type="number" step="0.001" min="0" class="grn-qty w-24 p-1 border rounded text-right" value="0"></td><td class="p-2 border-b"><input type="text" class="grn-batch w-full p-1 border rounded" placeholder="Batch"></td><td class="p-2 border-b"><input type="date" class="grn-expiry w-full p-1 border rounded"></td><td class="p-2 border-b"><input type="number" step="0.01" min="0" class="grn-price w-24 p-1 border rounded text-right" placeholder="0"></td><td class="p-2 border-b"><button type="button" onclick="window.removeGRNLine(this)" class="text-red-600 hover:text-red-800 text-sm">Remove</button></td>';
                             tbody.appendChild(row);
                         };
                         window.removeGRNLine = function(btn) {
@@ -5931,6 +6038,7 @@
                             if (typeof showView === 'function') showView('grn');
                         };
                     }
+                    window.renderGRNView = renderGRNView;
 
                     async function renderStockAdjustmentRequestsView() {
                         const container = document.getElementById('stock-adjustment-requests-view');
@@ -6868,7 +6976,7 @@
                     <h2 class="text-3xl font-bold">Supplier Management</h2>
                     <div class="flex gap-2">
                          <button onclick="exportSuppliersCSV()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Export CSV</button>
-                         <button onclick="openSupplierModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add Supplier</button>
+                         <button data-open-supplier-modal="1" onclick="window.invokeOpenSupplierModal && window.invokeOpenSupplierModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add Supplier</button>
                     </div>
                 </div>
                 <div class="overflow-x-auto bg-white rounded-lg shadow">
@@ -7014,7 +7122,7 @@
                     <h3 class="text-xl font-bold">Sales & Dispatch Log <span class="text-sm text-gray-500">(Serial-wise Tracking)</span></h3>
                     <div class="flex gap-2">
                         <input type="text" id="dispatch-search" placeholder="Search Dispatch..." class="px-3 py-2 border rounded text-sm" onkeyup="filterDispatchTable()">
-                        <button onclick="openCustomerModal()" class="px-3 py-2 bg-gray-600 text-white rounded text-sm">Manage Customers</button>
+                        <button onclick="window.openCustomerModal && window.openCustomerModal()" class="px-3 py-2 bg-gray-600 text-white rounded text-sm">Manage Customers</button>
                         <button onclick="exportCSV()" class="px-3 py-2 bg-green-600 text-white rounded text-sm">Export CSV</button>
                         <button onclick="openDispatchModal()" class="px-4 py-2 bg-blue-600 text-white rounded font-bold">+ New Dispatch</button>
                     </div>
@@ -7109,8 +7217,11 @@
                     // --- MODAL HANDLING & FORMS ---
                     function openModal(modalId) {
                         const el = document.getElementById(modalId);
+                        if (!el) { console.warn('Modal not found:', modalId); return; }
                         el.classList.remove('hidden');
                         el.classList.add('flex');
+                        el.style.display = 'flex';
+                        el.style.zIndex = '100000'; // Ensure it's on top of everything
                     }
                     function closeModal(modalId) {
                         const el = document.getElementById(modalId);
@@ -7154,6 +7265,40 @@
                         }
                     }
 
+                    function populateFormulaLinkDropdown(selectedFormulaId = '', selectedFormulaName = '') {
+                        const select = document.getElementById('item-linked-formula');
+                        if (!select) return;
+
+                        const formulas = (appState && Array.isArray(appState.formulas)) ? appState.formulas.slice() : [];
+                        formulas.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+                        let html = '<option value="">Auto match by name (no manual link)</option>';
+                        formulas.forEach(f => {
+                            const fId = f && f.id != null ? String(f.id) : '';
+                            const fName = String((f && f.name) || ('Formula ' + fId));
+                            const selectedById = selectedFormulaId !== '' && fId === String(selectedFormulaId);
+                            const selectedByName = !selectedById && selectedFormulaName && fName.toLowerCase() === String(selectedFormulaName).toLowerCase();
+                            const selectedAttr = (selectedById || selectedByName) ? ' selected' : '';
+                            html += '<option value="' + fId.replace(/"/g, '&quot;') + '" data-name="' + fName.replace(/"/g, '&quot;') + '"' + selectedAttr + '>' + fName.replace(/</g, '&lt;') + '</option>';
+                        });
+
+                        select.innerHTML = html;
+                    }
+
+                    function toggleFormulaLinkField() {
+                        const categoryEl = document.getElementById('item-category');
+                        const box = document.getElementById('formula-link-container');
+                        if (!categoryEl || !box) return;
+                        const isFg = categoryEl.value === 'finishedGoods';
+                        box.classList.toggle('hidden', !isFg);
+                        if (isFg && document.getElementById('item-linked-formula')) {
+                            // Keep list up to date in case formulas changed.
+                            if (!document.getElementById('item-linked-formula').options.length || document.getElementById('item-linked-formula').options.length <= 1) {
+                                populateFormulaLinkDropdown('', '');
+                            }
+                        }
+                    }
+
                     function openAddItemModal(category = 'rawMaterials') {
                         if (!checkPermission()) return;
                         document.getElementById('item-form').reset();
@@ -7162,10 +7307,14 @@
                         document.getElementById('item-category').value = category;
                         document.getElementById('item-stock-date').value = getToday();
                         document.getElementById('item-min-stock-level').value = 0; // Default for new items
+                        populateFormulaLinkDropdown('', '');
+                        if (document.getElementById('item-linked-formula')) document.getElementById('item-linked-formula').value = '';
                         document.getElementById('delete-item-btn').classList.add('hidden');
                         toggleExpiryDateField();
+                        toggleFormulaLinkField();
                         openModal('addItemModal');
                     }
+                    window.openAddItemModal = openAddItemModal;
 
                     function openEditItemModal(category, id) {
                         if (!checkPermission()) return;
@@ -7183,12 +7332,18 @@
                         document.getElementById('item-stock-date').value = item.openingStockDate;
                         document.getElementById('item-expiry-date').value = item.expiryDate || '';
                         document.getElementById('item-min-stock-level').value = item.minStockLevel !== undefined ? item.minStockLevel : 0; // Load existing min stock level
+                        populateFormulaLinkDropdown(item.linkedFormulaId || item.formulaId || '', item.linkedFormulaName || item.formulaName || '');
+                        if (document.getElementById('item-linked-formula')) {
+                            const linkedId = item.linkedFormulaId != null ? String(item.linkedFormulaId) : (item.formulaId != null ? String(item.formulaId) : '');
+                            document.getElementById('item-linked-formula').value = linkedId;
+                        }
 
                         const deleteBtn = document.getElementById('delete-item-btn');
                         deleteBtn.classList.remove('hidden');
                         deleteBtn.onclick = () => handleDeleteItem();
 
                         toggleExpiryDateField();
+                        toggleFormulaLinkField();
                         openModal('addItemModal');
                     }
 
@@ -7482,6 +7637,21 @@
                         };
                         if (category === 'rawMaterials' || category === 'finishedGoods') {
                             itemData.expiryDate = document.getElementById('item-expiry-date').value || null;
+                        }
+                        if (category === 'finishedGoods') {
+                            const formulaSelect = document.getElementById('item-linked-formula');
+                            const linkedFormulaId = formulaSelect ? String(formulaSelect.value || '').trim() : '';
+                            if (linkedFormulaId) {
+                                const linkedFormula = (appState.formulas || []).find(f => String(f.id) === linkedFormulaId);
+                                itemData.linkedFormulaId = linkedFormulaId;
+                                itemData.linkedFormulaName = linkedFormula ? (linkedFormula.name || '') : '';
+                            } else {
+                                itemData.linkedFormulaId = null;
+                                itemData.linkedFormulaName = '';
+                            }
+                        } else {
+                            itemData.linkedFormulaId = null;
+                            itemData.linkedFormulaName = '';
                         }
 
                         if (id) {
@@ -8956,7 +9126,7 @@
                     <h2 class="text-3xl font-bold">Customer Management</h2>
                     <div class="flex gap-2">
                         <button onclick="exportCustomersCSV()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Export CSV</button>
-                        <button onclick="openCustomerModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add Customer</button>
+                        <button onclick="window.openCustomerModal && window.openCustomerModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add Customer</button>
                     </div>
                 </div>
                     <div class="overflow-x-auto bg-white rounded-lg shadow">
@@ -8997,30 +9167,74 @@
                     }
 
                     function openSupplierModal(id = null) {
-                        if (!checkPermission()) return;
+                        // Supplier maintenance check
+                        var canOpen = checkPermission('store');
+                        if (!canOpen) return;
+                        
                         const form = document.getElementById('supplier-form');
                         if (form) form.reset();
                         const modalTitle = document.getElementById('supplier-modal-title');
-
+                        
                         if (id) {
-                            const supplier = appState.suppliers.find(s => s.id === id);
-                            if (supplier) {
+                            const supplier = (appState.suppliers || []).find(s => s.id === id);
+                            if (supplier && modalTitle) {
                                 modalTitle.textContent = 'Edit Supplier';
-                                document.getElementById('supplier-id').value = supplier.id;
-                                document.getElementById('supplier-name').value = supplier.name;
-                                document.getElementById('supplier-contact').value = supplier.contact || '';
-                                document.getElementById('supplier-phone').value = supplier.phone || '';
-                                document.getElementById('supplier-email').value = supplier.email || '';
-                                document.getElementById('supplier-approved').checked = supplier.approved !== false;
+                                if(document.getElementById('supplier-id')) document.getElementById('supplier-id').value = supplier.id;
+                                if(document.getElementById('supplier-name')) document.getElementById('supplier-name').value = supplier.name;
+                                if(document.getElementById('supplier-contact')) document.getElementById('supplier-contact').value = supplier.contact || '';
+                                if(document.getElementById('supplier-phone')) document.getElementById('supplier-phone').value = supplier.phone || '';
+                                if(document.getElementById('supplier-email')) document.getElementById('supplier-email').value = supplier.email || '';
+                                if(document.getElementById('supplier-approved')) document.getElementById('supplier-approved').checked = supplier.approved !== false;
                             }
                         } else {
-                            modalTitle.textContent = 'Add Supplier';
-                            document.getElementById('supplier-id').value = '';
+                            if (modalTitle) modalTitle.textContent = 'Add Supplier';
+                            if(document.getElementById('supplier-id')) document.getElementById('supplier-id').value = '';
                         }
-                        openModal('supplierModal');
+                        
+                        // Use robust window.openModal if available, otherwise fallback
+                        if (typeof window.openModal === 'function') {
+                            window.openModal('supplierModal');
+                        } else {
+                            openModal('supplierModal');
+                        }
                     }
-                    // Ensure inline onclick handlers can access this function
                     window.openSupplierModal = openSupplierModal;
+
+                    // Robust entry-point used by inline buttons in multiple views.
+                    // Falls back to direct modal opening if supplier handlers are not yet initialized.
+                    window.invokeOpenSupplierModal = function(id = null) {
+                        try {
+                            if (typeof window.openSupplierModal === 'function') {
+                                return window.openSupplierModal(id);
+                            }
+                            if (typeof openSupplierModal === 'function') {
+                                return openSupplierModal(id);
+                            }
+                        } catch (err) {
+                            console.warn('openSupplierModal failed, using fallback open', err);
+                        }
+
+                        const modal = document.getElementById('supplierModal');
+                        if (!modal) {
+                            if (typeof showAlert === 'function') {
+                                showAlert('Supplier form is not available on this page state. Please refresh and try again.', 'Error');
+                            }
+                            return;
+                        }
+
+                        const form = document.getElementById('supplier-form');
+                        if (form) form.reset();
+                        const title = document.getElementById('supplier-modal-title');
+                        if (title) title.textContent = id ? 'Edit Supplier' : 'Add Supplier';
+
+                        if (typeof window.openModal === 'function') {
+                            window.openModal('supplierModal');
+                            return;
+                        }
+
+                        modal.classList.remove('hidden');
+                        modal.classList.add('flex');
+                    };
 
                     function deleteSupplier(id) {
                         if (!checkPermission()) return;
@@ -9099,34 +9313,33 @@
 
                     function openCustomerModal(id = null) {
                         if (!checkPermission()) return;
-                        document.getElementById('customer-form').reset();
+                        
+                        const form = document.getElementById('customer-form');
+                        if (form) form.reset();
                         const modalTitle = document.querySelector('#customerModal h3');
 
                         if (id) {
-                            const customer = appState.customers.find(c => c.id === id);
-                            if (customer) {
+                            const customer = (appState.customers || []).find(c => c.id === id);
+                            if (customer && modalTitle) {
                                 modalTitle.textContent = 'Edit Customer';
-                                document.getElementById('edit-customer-id').value = customer.id;
-                                document.getElementById('customer-name').value = customer.name;
-                                document.getElementById('customer-gst').value = customer.gst || '';
-                                document.getElementById('customer-location').value = customer.location || '';
-                                document.getElementById('customer-type').value = customer.type || 'Dealer';
+                                if(document.getElementById('edit-customer-id')) document.getElementById('edit-customer-id').value = customer.id;
+                                if(document.getElementById('customer-name')) document.getElementById('customer-name').value = customer.name;
+                                if(document.getElementById('customer-gst')) document.getElementById('customer-gst').value = customer.gst || '';
+                                if(document.getElementById('customer-location')) document.getElementById('customer-location').value = customer.location || '';
+                                if(document.getElementById('customer-type')) document.getElementById('customer-type').value = customer.type || 'Dealer';
                             }
                         } else {
-                            modalTitle.textContent = 'Add New Customer';
-                            document.getElementById('edit-customer-id').value = '';
+                            if (modalTitle) modalTitle.textContent = 'Add New Customer';
+                            if(document.getElementById('edit-customer-id')) document.getElementById('edit-customer-id').value = '';
                         }
-                        openModal('customerModal');
-
-                        // Force z-index to ensure it's on top
-                        setTimeout(() => {
-                            const modal = document.getElementById('customerModal');
-                            if (modal) {
-                                modal.style.zIndex = '9999';
-                                console.log('CustomerModal z-index set to:', window.getComputedStyle(modal).zIndex);
-                            }
-                        }, 10);
+                        
+                        if (typeof window.openModal === 'function') {
+                            window.openModal('customerModal');
+                        } else {
+                            openModal('customerModal');
+                        }
                     }
+                    window.openCustomerModal = openCustomerModal;
 
                     function editCustomer(id) {
                         if (!checkPermission()) return;
@@ -9550,8 +9763,43 @@
                     window.openModal = function (modalId) {
                         const modal = document.getElementById(modalId);
                         if (modal) {
+                            if (modalId === 'supplierModal') {
+                                // Ensure supplier modal is not trapped inside hidden/zero-size containers.
+                                if (modal.parentElement !== document.body) {
+                                    document.body.appendChild(modal);
+                                }
+                                modal.style.setProperty('position', 'fixed', 'important');
+                                modal.style.setProperty('top', '0', 'important');
+                                modal.style.setProperty('right', '0', 'important');
+                                modal.style.setProperty('bottom', '0', 'important');
+                                modal.style.setProperty('left', '0', 'important');
+                                modal.style.setProperty('width', '100vw', 'important');
+                                modal.style.setProperty('height', '100vh', 'important');
+                                modal.style.setProperty('align-items', 'center', 'important');
+                                modal.style.setProperty('justify-content', 'center', 'important');
+                                modal.style.setProperty('z-index', '2147483647', 'important');
+                            }
+
                             modal.classList.remove('hidden');
                             modal.classList.add('flex');
+                            // Force visibility: some modals can get inline styles or CSS rules that hide them.
+                            modal.style.setProperty('display', 'flex', 'important');
+                            modal.style.setProperty('visibility', 'visible', 'important');
+                            modal.style.setProperty('pointer-events', 'auto', 'important');
+                            modal.style.setProperty('opacity', '1', 'important');
+
+                            try {
+                                const cs = window.getComputedStyle ? window.getComputedStyle(modal) : null;
+                                const rect = modal.getBoundingClientRect ? modal.getBoundingClientRect() : null;
+                                console.log('[Modal] openModal()', modalId, {
+                                    className: modal.className,
+                                    display: cs ? cs.display : null,
+                                    visibility: cs ? cs.visibility : null,
+                                    pointerEvents: cs ? cs.pointerEvents : null,
+                                    zIndex: cs ? cs.zIndex : null
+                                    ,rect
+                                });
+                            } catch (e) { }
                         } else {
                             console.error('Modal not found:', modalId);
                         }
@@ -9560,19 +9808,33 @@
                     window.closeModal = function (modalId) {
                         const modal = document.getElementById(modalId);
                         if (modal) {
+                            try {
+                                console.log('[Modal] closeModal()', modalId, { className: modal.className });
+                            } catch (e) { }
                             modal.classList.add('hidden');
                             modal.classList.remove('flex');
+                            modal.style.removeProperty('display');
+                            modal.style.removeProperty('visibility');
+                            modal.style.removeProperty('pointer-events');
                         }
                     };
 
                     function checkPermission(minRole = 'production') {
-                        // Roles: viewer < store < production < admin  (Simplified for this logic)
-                        // Actually, let's just deny viewers from ANY write action
-                        if (currentUserRole === 'viewer') {
+                        // Role ladder used across the app (keep in sync with checkAccess()).
+                        // viewer < production < store < admin
+                        const roles = ['viewer', 'production', 'store', 'admin'];
+                        const normalizedCurrent = String(currentUserRole || 'viewer').toLowerCase();
+                        const userIdx = roles.indexOf(normalizedCurrent);
+                        const userLevel = userIdx === -1 ? 0 : userIdx; // unknown roles => most restrictive
+
+                        const normalizedMin = String(minRole || 'production').toLowerCase();
+                        let reqIdx = roles.indexOf(normalizedMin);
+                        if (reqIdx === -1) reqIdx = roles.indexOf('production');
+
+                        if (userLevel < reqIdx) {
                             showAlert("Access Denied: You do not have permission to perform this action.");
                             return false;
                         }
-                        // Add more granular checks if needed
                         return true;
                     }
 
@@ -9796,7 +10058,7 @@
                     <h2 class="text-3xl font-bold">Supplier Management</h2>
                     <div class="flex gap-2">
                          <button onclick="exportSuppliersCSV()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Export CSV</button>
-                         <button onclick="openSupplierModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add Supplier</button>
+                         <button data-open-supplier-modal="1" onclick="window.invokeOpenSupplierModal && window.invokeOpenSupplierModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add Supplier</button>
                     </div>
                 </div>
                 <div class="overflow-x-auto bg-white rounded-lg shadow">
@@ -10568,6 +10830,139 @@
                     };
 
                     // 2. FG Cost Update Helper (SAFE MODE)
+                    if (typeof window.resolveFormulaCostItem !== 'function') {
+                        window.resolveFormulaCostItem = function (entry, fallbackCategory) {
+                            try {
+                                const inv = (appState && appState.inventory) ? appState.inventory : {};
+                                const categories = ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'];
+                                const normalizedMap = {
+                                    raw: 'rawMaterials',
+                                    rawmaterial: 'rawMaterials',
+                                    rawmaterials: 'rawMaterials',
+                                    packing: 'packingMaterials',
+                                    packingmaterial: 'packingMaterials',
+                                    packingmaterials: 'packingMaterials',
+                                    label: 'labels',
+                                    labels: 'labels',
+                                    finished: 'finishedGoods',
+                                    finishedgood: 'finishedGoods',
+                                    finishedgoods: 'finishedGoods'
+                                };
+
+                                const rawCat = String((entry && entry.category) || fallbackCategory || '').replace(/[^a-z]/gi, '').toLowerCase();
+                                const preferred = normalizedMap[rawCat] || (categories.includes(fallbackCategory) ? fallbackCategory : null);
+                                const searchCats = preferred ? [preferred].concat(categories.filter(c => c !== preferred)) : categories.slice();
+
+                                const idCandidates = [entry && entry.itemId, entry && entry.id, entry && entry.materialId]
+                                    .filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+                                const nameCandidates = [entry && entry.itemName, entry && entry.name]
+                                    .filter(v => v !== undefined && v !== null && String(v).trim() !== '')
+                                    .map(v => String(v).trim().toLowerCase());
+
+                                for (const cat of searchCats) {
+                                    const list = Array.isArray(inv[cat]) ? inv[cat] : [];
+                                    for (const idVal of idCandidates) {
+                                        const idStr = String(idVal).trim();
+                                        const idNum = parseFloat(idStr);
+                                        const foundById = list.find(it => {
+                                            const itStr = String(it.id).trim();
+                                            if (itStr === idStr) return true;
+                                            if (!isNaN(idNum)) {
+                                                const itNum = parseFloat(it.id);
+                                                if (!isNaN(itNum) && itNum === idNum) return true;
+                                            }
+                                            return false;
+                                        });
+                                        if (foundById) return { item: foundById, category: cat };
+                                    }
+
+                                    if (nameCandidates.length) {
+                                        const foundByName = list.find(it => nameCandidates.includes(String(it.name || '').trim().toLowerCase()));
+                                        if (foundByName) return { item: foundByName, category: cat };
+                                    }
+                                }
+
+                                return { item: null, category: null };
+                            } catch (e) {
+                                return { item: null, category: null };
+                            }
+                        };
+                    }
+
+                    if (typeof window.findLinkedFormulaForItem !== 'function') {
+                        window.findLinkedFormulaForItem = function (item) {
+                            const formulas = (appState && Array.isArray(appState.formulas)) ? appState.formulas : [];
+                            if (!item || !formulas.length) return null;
+
+                            const norm = function (v) {
+                                return String(v || '').trim().toLowerCase();
+                            };
+
+                            const linkedId = item.linkedFormulaId != null ? item.linkedFormulaId : item.formulaId;
+                            if (linkedId != null && String(linkedId).trim() !== '') {
+                                const byId = formulas.find(f => String(f.id) === String(linkedId));
+                                if (byId) return byId;
+                            }
+
+                            const linkedName = item.linkedFormulaName || item.formulaName;
+                            if (linkedName) {
+                                const byLinkedName = formulas.find(f => norm(f.name) === norm(linkedName));
+                                if (byLinkedName) return byLinkedName;
+                            }
+
+                            const itemName = norm(item.name);
+                            if (!itemName) return null;
+                            return formulas.find(f => norm(f.name) === itemName) || null;
+                        };
+                    }
+
+                    if (typeof window.promptLinkFormulaForFinishedGood !== 'function') {
+                        window.promptLinkFormulaForFinishedGood = function (item) {
+                            const formulas = (appState && Array.isArray(appState.formulas)) ? appState.formulas : [];
+                            if (!item || !formulas.length) {
+                                alert('No formulas available to link.');
+                                return null;
+                            }
+
+                            const maxList = Math.min(40, formulas.length);
+                            const listText = formulas.slice(0, maxList).map((f, i) => (i + 1) + '. ' + (f.name || ('Formula ' + f.id))).join('\n');
+                            const input = prompt(
+                                'No exact formula name match for "' + (item.name || 'this item') + '".\n\n' +
+                                'Enter formula number to link permanently (1-' + maxList + '),\n' +
+                                'or type formula name/id to search, or 0 to cancel.\n\n' +
+                                listText
+                            );
+
+                            if (input == null) return null;
+                            const raw = String(input).trim();
+                            if (!raw || raw === '0') return null;
+
+                            let chosen = null;
+                            const idx = parseInt(raw, 10);
+                            if (!isNaN(idx) && idx >= 1 && idx <= maxList) {
+                                chosen = formulas[idx - 1];
+                            }
+
+                            if (!chosen) {
+                                const q = raw.toLowerCase();
+                                chosen = formulas.find(f => String(f.id) === raw) ||
+                                    formulas.find(f => String(f.name || '').trim().toLowerCase() === q) ||
+                                    formulas.find(f => String(f.name || '').toLowerCase().includes(q));
+                            }
+
+                            if (!chosen) {
+                                alert('Formula not found for: ' + raw);
+                                return null;
+                            }
+
+                            item.linkedFormulaId = chosen.id;
+                            item.linkedFormulaName = chosen.name || '';
+                            if (typeof saveState === 'function') saveState();
+                            if (typeof showAlert === 'function') showAlert('Linked to formula: ' + (chosen.name || chosen.id));
+                            return chosen;
+                        };
+                    }
+
                     window.updateItemCostFromFormula = function (itemId) {
                         try {
                             console.log("ANTIGRAVITY: updateItemCostFromFormula called for ID:", itemId);
@@ -10592,12 +10987,13 @@
                             if (!appState.formulas) appState.formulas = [];
 
                             // 3. Find Formula (Defensive against bad data)
-                            const cleanItemName = (item.name || '').trim().toLowerCase();
-                            if (!cleanItemName) throw new Error("Item has no valid name.");
-
-                            const formula = appState.formulas.find(f => (f.name || '').trim().toLowerCase() === cleanItemName);
+                            let formula = window.findLinkedFormulaForItem(item);
 
                             // 4. Handle Missing Formula
+                            if (!formula) {
+                                formula = window.promptLinkFormulaForFinishedGood(item);
+                            }
+
                             if (!formula) {
                                 const msg = `Formula for "${item.name}" not found in Formulation section.\n\nDo you want to create a new formula now?`;
 
@@ -10630,13 +11026,14 @@
                             if (!Array.isArray(formula.ingredients)) throw new Error("Formula ingredients list is malformed.");
 
                             formula.ingredients.forEach(ing => {
-                                if (!ing.itemId) return;
-                                const ingItem = findItem(ing.category, ing.itemId);
+                                const resolved = window.resolveFormulaCostItem(ing, 'rawMaterials');
+                                const ingItem = resolved.item;
+                                const qty = parseFloat(ing && (ing.quantity != null ? ing.quantity : ing.qty)) || 0;
                                 if (ingItem) {
                                     const cost = (ingItem.currentAverageCost || ingItem.price || 0);
-                                    totalCost += (ing.quantity || 0) * cost;
+                                    totalCost += qty * cost;
                                 } else {
-                                    missingIngredients.push(ing.itemId);
+                                    missingIngredients.push((ing && (ing.itemId || ing.id || ing.name)) || 'unknown');
                                 }
                             });
 
@@ -10649,11 +11046,12 @@
                             // Packing Materials
                             if (formula.packingMaterials && Array.isArray(formula.packingMaterials)) {
                                 formula.packingMaterials.forEach(pm => {
-                                    if (!pm.itemId) return;
-                                    const pmItem = findItem('packingMaterials', pm.itemId);
+                                    const resolved = window.resolveFormulaCostItem(pm, 'packingMaterials');
+                                    const pmItem = resolved.item;
+                                    const qty = parseFloat(pm && (pm.quantity != null ? pm.quantity : pm.qty)) || 0;
                                     if (pmItem) {
                                         const cost = (pmItem.currentAverageCost || pmItem.price || 0);
-                                        totalCost += (pm.quantity || 0) * cost;
+                                        totalCost += qty * cost;
                                     }
                                 });
                             }
@@ -12491,7 +12889,7 @@
 
 
             <!-- ERP MODALS -->
-            <div id="supplierModal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50">
+            <div id="supplierModal" class="modal hidden fixed inset-0 bg-black bg-opacity-50 justify-center items-center" style="z-index: 999999 !important;">
                 <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
                     <h3 class="text-xl font-bold mb-4" id="supplier-modal-title">Add Supplier</h3>
                     <form id="supplier-form">
@@ -12516,52 +12914,7 @@
                 </div>
             </div>
 
-            <div id="customerModal"
-                class="modal hidden fixed inset-0 bg-black bg-opacity-50 justify-center items-center"
-                style="z-index: 9999 !important; pointer-events: auto;">
-                <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-xl font-bold">Add/Edit Customer</h3>
-                        <button onclick="closeModal('customerModal')"
-                            class="text-gray-500 hover:text-gray-800">&times;</button>
-                    </div>
-                    <form id="customer-form">
-                        <input type="hidden" id="edit-customer-id">
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium">Customer Name</label>
-                            <input type="text" id="customer-name" class="w-full p-2 border rounded-md" required>
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium">GST Number</label>
-                            <input type="text" id="customer-gst" class="w-full p-2 border rounded-md">
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium">Location</label>
-                            <input type="text" id="customer-location" class="w-full p-2 border rounded-md">
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium">Type</label>
-                            <select id="customer-type" class="w-full p-2 border rounded-md">
-                                <option value="Dealer">Dealer</option>
-                                <option value="Farmer">Farmer</option>
-                                <option value="Institution">Institution</option>
-                                <option value="Demo">Demo</option>
-                                <option value="Client">Client</option>
-                                <option value="Testing">Testing</option>
-                                <option value="Sample">Sample</option>
-                                <option value="Buyer">Buyer</option>
-                                <option value="Estate">Estate</option>
-                            </select>
-                        </div>
-                        <div class="flex justify-end gap-2">
-                            <button type="button" onclick="closeModal('customerModal')"
-                                class="px-4 py-2 bg-gray-300 rounded-lg">Cancel</button>
-                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg">Save
-                                Customer</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
+            <!-- Duplicate customerModal removed — primary instance is at line ~1012 -->
 
             <!-- Stock Adjustment Modal -->
             <div id="adjustStockModal"
@@ -22490,10 +22843,17 @@
 
                             // 3. Find Formula (Strict Name Match)
                             if (!appState.formulas) appState.formulas = [];
-                            const cleanName = (item.name || "").trim().toLowerCase();
-                            const formula = appState.formulas.find(f => (f.name || "").trim().toLowerCase() === cleanName);
+                            let formula = (typeof window.findLinkedFormulaForItem === 'function')
+                                ? window.findLinkedFormulaForItem(item)
+                                : appState.formulas.find(f => (f.name || "").trim().toLowerCase() === (item.name || "").trim().toLowerCase());
 
                             // 4. MISSING FORMULA -> MANUAL PROMPT ONLY (No Redirection)
+                            if (!formula) {
+                                if (typeof window.promptLinkFormulaForFinishedGood === 'function') {
+                                    formula = window.promptLinkFormulaForFinishedGood(item);
+                                }
+                            }
+
                             if (!formula) {
                                 const msg = "Formula not found for: " + item.name + "\n\n" +
                                     "To fix this:\n" +
@@ -22512,7 +22872,10 @@
 
                             if (Array.isArray(formula.ingredients)) {
                                 formula.ingredients.forEach(ing => {
-                                    const iItem = findItem(ing.category, ing.itemId);
+                                    const resolved = (typeof window.resolveFormulaCostItem === 'function')
+                                        ? window.resolveFormulaCostItem(ing, 'rawMaterials')
+                                        : { item: findItem(ing.category, ing.itemId), category: ing.category };
+                                    const iItem = resolved.item;
                                     if (iItem) {
                                         const cost = parseFloat(iItem.currentAverageCost) || parseFloat(iItem.price) || 0;
                                         const qty = parseFloat(ing.quantity) || 0;
@@ -22520,7 +22883,7 @@
                                         totalCost += lineTotal;
                                         breakdown += iItem.name + ": " + qty + " x " + cost.toFixed(2) + " = " + lineTotal.toFixed(2) + "\n";
                                     } else {
-                                        missing.push("ID: " + ing.itemId);
+                                        missing.push("ID: " + ((ing && (ing.itemId || ing.id || ing.name)) || 'unknown'));
                                     }
                                 });
                             }
@@ -22528,7 +22891,10 @@
                             // Packing
                             if (Array.isArray(formula.packingMaterials)) {
                                 formula.packingMaterials.forEach(pm => {
-                                    const pItem = findItem('packingMaterials', pm.itemId);
+                                    const resolved = (typeof window.resolveFormulaCostItem === 'function')
+                                        ? window.resolveFormulaCostItem(pm, 'packingMaterials')
+                                        : { item: findItem('packingMaterials', pm.itemId), category: 'packingMaterials' };
+                                    const pItem = resolved.item;
                                     if (pItem) {
                                         const cost = parseFloat(pItem.currentAverageCost) || parseFloat(pItem.price) || 0;
                                         const qty = parseFloat(pm.quantity) || 0;
@@ -23055,7 +23421,7 @@
                             // Populate Indenters Dropdown
                             var indenterOptions = (appState.indenters || []).map(name => `<option value="${name}">${name}</option>`).join('');
 
-                            var gasUrl = (window._inventoryUseFirebase ? 'firebase' : null) || localStorage.getItem('GAS_REQ_URL') || localStorage.getItem('inventoryCloudUrl') || localStorage.getItem('GAS_URL') || '';
+                            var gasUrl = window._inventoryUseFirebase ? 'firebase' : '';
 
                             container.innerHTML = `
                 <div class="flex justify-between items-center mb-6">
@@ -23065,7 +23431,7 @@
                     </div>
                     <div class="flex gap-2">
                          <button onclick="configureGasUrl()" class="px-3 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 font-bold flex items-center text-xs">
-                            ⚙️ Config Link
+                            Firebase Only
                         </button>
                          <button onclick="window.openBatchReqModal()" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded shadow hover:shadow-lg font-bold flex items-center">
                             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
@@ -23185,19 +23551,15 @@
                     };
 
                     window.configureGasUrl = function () {
-                        var current = localStorage.getItem('GAS_REQ_URL') || '';
-                        var url = prompt("Enter Google Apps Script Web App URL:", current);
-                        if (url !== null) {
-                            localStorage.setItem('GAS_REQ_URL', url.trim());
-                            alert("URL Saved.");
-                            renderRequisitionView(); // Refresh
-                        }
+                        localStorage.removeItem('GAS_REQ_URL');
+                        alert('Material Requisition now uses Firebase only. Google Sheets / Apps Script links are no longer used here.');
+                        renderRequisitionView();
                     };
 
                     window.refreshPendingRequisitions = async function () {
                         var sel = document.getElementById('pending-req-select');
                         if (!sel) return;
-                        if (!useFirebase && !localStorage.getItem('inventoryCloudUrl') && !localStorage.getItem('GAS_REQ_URL')) return;
+                        if (!useFirebase) return;
 
                         sel.innerHTML = '<option>Loading...</option>';
                         sel.disabled = true;
@@ -24801,17 +25163,8 @@
                                 json = { result: 'error', error: e.message };
                             }
                         } else {
-                            const url = localStorage.getItem('GAS_URL') || localStorage.getItem('inventoryCloudUrl') || '';
-                            if (!url) {
-                                sel.innerHTML = '<option>No Backend URL - Click Settings ⚙️</option>';
-                                return;
-                            }
-                            try {
-                                const resp = await fetch(`${url}?action=get_pending_production&_t=${Date.now()}`);
-                                json = await resp.json();
-                            } catch (e) {
-                                json = { result: 'error', error: e.message };
-                            }
+                            sel.innerHTML = '<option>Firebase backend not available</option>';
+                            return;
                         }
                         try {
 
@@ -24925,18 +25278,11 @@
 
                     // --- CONFIGURATION ---
                     window.configureBackendURL = function () {
-                        const current = localStorage.getItem('GAS_URL') || localStorage.getItem('inventoryCloudUrl') || '';
-                        const url = prompt("Enter Google Apps Script Web App URL:", current);
-                        if (url && url.startsWith('http')) {
-                            localStorage.setItem('GAS_URL', url.trim());
-                            localStorage.setItem('inventoryCloudUrl', url.trim()); // Sync both keys
-                            localStorage.setItem('GAS_REQ_URL', url.trim()); // Material Requisition Slip
-
-                            alert("URL Saved! Refreshing list...");
-                            loadPendingProductionSlips();
-                        } else if (url !== null) {
-                            alert("Invalid URL. Please enter a valid web app URL.");
-                        }
+                        localStorage.removeItem('GAS_URL');
+                        localStorage.removeItem('inventoryCloudUrl');
+                        localStorage.removeItem('GAS_REQ_URL');
+                        alert('Pending Production now uses Firebase only. No Google Sheets backend URL is required.');
+                        loadPendingProductionSlips();
                     };
 
                     window.createOrder = function () {
@@ -25661,8 +26007,18 @@
                         } catch (error) {
                             var errMsg = error.message || 'Failed to load queue';
                             var friendlyMsg = (errMsg.indexOf('Invalid action') >= 0)
-                                ? 'Requisition backend does not support this action. Update the Google Apps Script Web App with the latest script (ensure get_material_queue and get_requisition_queue are supported) and redeploy.'
-                                : errMsg;
+                                ? 'Firebase requisition backend does not support this action. Verify the requested handler exists in the Firebase backend.'
+                                : (isRequisitionPermissionDeniedError(errMsg)
+                                    ? 'Firebase denied this read. The app role label is not enough by itself. Your Firebase Auth user and Firestore Users profile must both be authorized.'
+                                    : errMsg);
+
+                            if (isRequisitionPermissionDeniedError(errMsg)) {
+                                const localQueue = getLocalMaterialQueueFallback();
+                                displayMaterialQueue(localQueue);
+                                container.insertAdjacentHTML('afterbegin', '\u003cdiv class="mb-3 bg-yellow-50 border border-yellow-300 text-yellow-900 rounded p-3 text-sm"\u003eShowing local cached requisition queue because cloud permission was denied.\u003c/div\u003e');
+                                return;
+                            }
+
                             var rawLine = (errMsg.indexOf('Invalid action') >= 0) ? '\u003cp class="text-red-600 text-sm mt-2"\u003eRaw: ' + (errMsg.replace(/</g, '&lt;')) + '\u003c/p\u003e' : '';
                             container.innerHTML = '\u003cdiv class="bg-red-50 border border-red-200 rounded-lg p-4 text-center"\u003e\u003cp class="text-red-800 font-medium"\u003e' + friendlyMsg + '\u003c/p\u003e' + rawLine + '\u003cbutton onclick="loadMaterialRequisitionQueue()" class="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"\u003eRetry\u003c/button\u003e\u003c/div\u003e';
                         }
@@ -25698,8 +26054,63 @@
                     }
 
                     function getRequisitionApiUrl() {
-                        if (useFirebase) return 'firebase';
-                        return localStorage.getItem('inventoryCloudUrl') || localStorage.getItem('cloud-api-url') || localStorage.getItem('GAS_URL') || localStorage.getItem('GAS_REQ_URL');
+                        return useFirebase ? 'firebase' : '';
+                    }
+
+                    function isRequisitionPermissionDeniedError(errMsg) {
+                        return /missing or insufficient permissions|permission-denied|insufficient permissions/i.test(errMsg || '');
+                    }
+
+                    function getLocalMaterialQueueFallback() {
+                        const reqs = Array.isArray(appState && appState.requisitions) ? appState.requisitions : [];
+                        const queue = [];
+
+                        reqs.forEach(req => {
+                            const reqItems = Array.isArray(req.items) ? req.items : [];
+                            reqItems.forEach(item => {
+                                const status = String(item.consumptionStatus || item.status || '').toLowerCase();
+                                if (status.includes('consumed')) return;
+
+                                queue.push({
+                                    reqId: req.id || ('LOCAL-' + Date.now()),
+                                    date: req.date || new Date().toISOString(),
+                                    requester: req.indenter || req.requesterName || req.requesterEmail || 'Local User',
+                                    item: item.itemName || item.name || '-',
+                                    category: item.category || 'rawMaterials',
+                                    qty: Number(item.qty || item.quantity || 0),
+                                    unit: item.unit || 'pcs',
+                                    purpose: req.purpose || '-',
+                                    consumptionStatus: item.consumptionStatus || item.status || 'Pending Manager Approval'
+                                });
+                            });
+                        });
+
+                        return queue;
+                    }
+
+                    function getLocalAllRequisitionsFallback() {
+                        const reqs = Array.isArray(appState && appState.requisitions) ? appState.requisitions : [];
+                        return reqs.map(req => {
+                            const firstItem = (Array.isArray(req.items) && req.items.length) ? req.items[0] : {};
+                            return {
+                                id: req.id || ('LOCAL-' + Date.now()),
+                                type: req.type || 'MATERIAL',
+                                status: req.status || 'LOCAL RECORD',
+                                requesterName: req.indenter || req.requesterName || 'Local User',
+                                requesterEmail: req.requesterEmail || '',
+                                productName: firstItem.itemName || firstItem.name || req.productName || '-',
+                                quantity: firstItem.qty || firstItem.quantity || req.quantity || '',
+                                unit: firstItem.unit || req.unit || '',
+                                currentStage: req.currentStage || 'Local',
+                                timestamp: req.date || req.timestamp || new Date().toISOString()
+                            };
+                        });
+                    }
+
+                    function getLocalWIPFallback() {
+                        const batches = Array.isArray(appState && appState.activeProduction) ? appState.activeProduction : [];
+                        const pending = Array.isArray(appState && appState.productionQueue) ? appState.productionQueue : [];
+                        return { batches, pending };
                     }
 
                     function switchRequisitionTab(tab) {
@@ -25730,10 +26141,20 @@
                         } catch (e) {
                             var errMsg = e.message || 'Failed';
                             var friendlyMsg = (errMsg.indexOf('Invalid action') >= 0)
-                                ? 'Requisition backend does not support this action. Update the Google Apps Script Web App with the latest script (ensure get_requests_by_stage and get_all_requests are supported) and redeploy.'
-                                : errMsg;
+                                ? 'Firebase requisition backend does not support this action. Verify the requested handler exists in the Firebase backend.'
+                                : (isRequisitionPermissionDeniedError(errMsg)
+                                    ? 'Firebase denied this read. The app role label is not enough by itself. Your Firebase Auth user and Firestore Users profile must both be authorized.'
+                                    : errMsg);
+
+                            if (isRequisitionPermissionDeniedError(errMsg)) {
+                                const localRequests = getLocalAllRequisitionsFallback();
+                                displayAllRequisitions(localRequests);
+                                container.insertAdjacentHTML('afterbegin', '\u003cdiv class="mb-3 bg-yellow-50 border border-yellow-300 text-yellow-900 rounded p-3 text-sm"\u003eShowing local cached requisitions because cloud permission was denied.\u003c/div\u003e');
+                                return;
+                            }
+
                             var rawLine = (errMsg.indexOf('Invalid action') >= 0) ? '\u003cp class="text-red-600 text-sm mt-2"\u003eRaw: ' + (errMsg.replace(/</g, '&lt;')) + '\u003c/p\u003e' : '';
-                            var testUrl = (errMsg.indexOf('Invalid action') >= 0 && apiUrl) ? '\u003cp class="text-sm mt-3"\u003e\u003ca href="' + (apiUrl + '?action=get_all_requests').replace(/"/g, '&quot;') + '" target="_blank" rel="noopener" class="text-blue-600 underline"\u003eTest backend in new tab\u003c/a\u003e – if you see \u003ccode\u003eInvalid action\u003c/code\u003e there too, the script in Apps Script is not updated.\u003c/p\u003e\u003cp class="text-sm mt-2 text-gray-700"\u003eChecklist: 1) Copy full \u003ccode\u003egoogle sheet script.txt\u003c/code\u003e into Apps Script Code.gs. 2) Save. 3) Deploy \u003e Manage deployments \u003e Edit \u003e Version: New version \u003e Deploy. 4) In Cloud Settings paste the Web App URL (ends with /exec).\u003c/p\u003e' : '';
+                            var testUrl = (errMsg.indexOf('Invalid action') >= 0) ? '\u003cp class="text-sm mt-3 text-gray-700"\u003eChecklist: 1) Confirm the action is defined in firebase-backend.js. 2) Confirm Firebase initialized successfully. 3) Confirm the signed-in user has permission in Firestore rules.\u003c/p\u003e' : '';
                             container.innerHTML = '\u003cdiv class="bg-red-50 border border-red-200 rounded p-4"\u003e\u003cp class="text-red-800 font-medium"\u003e' + friendlyMsg + '\u003c/p\u003e' + rawLine + testUrl + '\u003cbutton onclick="loadAllRequisitions()" class="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"\u003eRetry\u003c/button\u003e\u003c/div\u003e';
                         }
                     }
@@ -25839,7 +26260,14 @@
                             const [batchesData, pendingData] = await Promise.all([requisitionCall('get_wip_batches', {}), requisitionCall('get_pending_production', {})]);
                             displayWIPMonitor((batchesData.batches || []), (pendingData.pending || []));
                         } catch (e) {
-                            container.innerHTML = '\u003cdiv class="bg-red-50 border border-red-200 rounded p-4"\u003eError: ' + (e.message || 'Failed') + '\u003c/div\u003e';
+                            var errMsg = e.message || 'Failed';
+                            if (isRequisitionPermissionDeniedError(errMsg)) {
+                                const localWIP = getLocalWIPFallback();
+                                displayWIPMonitor(localWIP.batches || [], localWIP.pending || []);
+                                container.insertAdjacentHTML('afterbegin', '\u003cdiv class="mb-3 bg-yellow-50 border border-yellow-300 text-yellow-900 rounded p-3 text-sm"\u003eShowing local WIP data because cloud permission was denied.\u003c/div\u003e');
+                                return;
+                            }
+                            container.innerHTML = '\u003cdiv class="bg-red-50 border border-red-200 rounded p-4"\u003eError: ' + errMsg + '\u003c/div\u003e';
                         }
                     }
 
