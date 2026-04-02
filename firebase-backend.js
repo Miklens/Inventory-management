@@ -804,9 +804,9 @@
     var hashed = await sha256(combined);
     var match = (stored === hashed) || (/^[a-f0-9]{64}$/i.test(stored) === false && stored === String(password).trim());
     if (!match) return { result: 'error', error: 'Invalid email or password.' };
-    return ok({
-      user: { email: u.Email || emailNorm, name: u.Name || '', role: u.Role || '', department: u.Department || '' }
-    });
+    var loginUser = { email: u.Email || emailNorm, name: u.Name || '', role: u.Role || '', department: u.Department || '' };
+    syncUsersToAppsScriptDirectory(false, loginUser).catch(function () {});
+    return ok({ user: loginUser });
   }
 
   async function getMyProfile() {
@@ -819,10 +819,9 @@
     }
     if (!snap.exists) return fail(new Error('Not on the approve list'));
     var u = snap.data();
-    syncUsersToAppsScriptDirectory(false).catch(function () {});
-    return ok({
-      user: { uid: uid, email: u.Email || auth.currentUser.email || '', name: u.Name || '', role: u.Role || '', department: u.Department || '' }
-    });
+    var profileUser = { uid: uid, email: u.Email || auth.currentUser.email || '', name: u.Name || '', role: u.Role || '', department: u.Department || '' };
+    syncUsersToAppsScriptDirectory(false, profileUser).catch(function () {});
+    return ok({ user: profileUser });
   }
 
   async function getDb() {
@@ -3420,10 +3419,8 @@
       backendConfig = config && typeof config === 'object' ? config : {};
       var app = global.firebase.initializeApp(config);
       db = global.firebase.firestore();
-      // Keep reminder recipients synced from Firebase Users automatically.
-      setTimeout(function () {
-        syncUsersToAppsScriptDirectory(false).catch(function () {});
-      }, 1200);
+      // Keep reminder recipients synced from Firebase Users automatically (admin/manager only).
+      // Role not known at init time; full sync will run after first profile load.
       return true;
     } catch (e) {
       console.error('Firebase init failed', e);
