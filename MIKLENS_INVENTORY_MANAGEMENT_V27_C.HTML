@@ -796,6 +796,44 @@
         </div>
     </div>
 
+    <!-- Merge Duplicates Modal (Finished Goods Only) -->
+    <div id="mergeDuplicatesModal" class="modal hidden fixed inset-0 bg-black bg-opacity-50 justify-center items-center" style="z-index: 999997 !important;">
+        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">Merge Duplicate Finished Goods</h3>
+                <button onclick="closeModal('mergeDuplicatesModal')" class="text-gray-500 hover:text-gray-800">&times;</button>
+            </div>
+            <p class="text-sm text-gray-700 mb-4">Select the Primary Product and the Duplicate Product to merge. All transactions and stock will be moved to the Primary Product.</p>
+            
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Primary Product (Keep This)</label>
+                <select id="merge-primary-product" class="w-full p-2 border rounded-md">
+                    <option value="">-- Select Primary Product --</option>
+                </select>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Duplicate Product (Merge Into Primary)</label>
+                <select id="merge-duplicate-product" class="w-full p-2 border rounded-md">
+                    <option value="">-- Select Duplicate Product --</option>
+                </select>
+            </div>
+
+            <div id="merge-preview" class="hidden mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h4 class="font-semibold mb-2">Merge Preview:</h4>
+                <p class="text-sm mb-2"><strong>Primary:</strong> <span id="merge-preview-primary"></span></p>
+                <p class="text-sm mb-2"><strong>Duplicate:</strong> <span id="merge-preview-duplicate"></span></p>
+                <p class="text-sm mb-2"><strong>Transactions to Move:</strong> <span id="merge-preview-count">0</span></p>
+                <p class="text-sm text-blue-700"><strong>Result:</strong> All transactions from Duplicate will be reassigned to Primary and the Duplicate item will be removed.</p>
+            </div>
+
+            <div class="flex justify-end gap-4">
+                <button onclick="closeModal('mergeDuplicatesModal')" class="px-4 py-2 bg-gray-300 rounded-lg">Cancel</button>
+                <button onclick="performMergeDuplicates()" class="px-4 py-2 bg-red-600 text-white rounded-lg">Execute Merge</button>
+            </div>
+        </div>
+    </div>
+
     <div id="editTxModal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-[60]">
         <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
             <div class="flex justify-between items-center mb-4">
@@ -2806,7 +2844,7 @@
                             }
                         });
 
-                        const closingStock = openingStock + received - consumed;
+                        const closingStock = parseFloat((openingStock + received - consumed).toFixed(9));
 
                         return { openingStock, received, consumed, closingStock };
                     }
@@ -3043,6 +3081,28 @@
                         const categoryMap = { "raw-materials": "rawMaterials", "packing-materials": "packingMaterials", "labels": "labels", "finished-goods": "finishedGoods" };
                         if (categoryMap[currentView]) {
                             renderInventoryView(categoryMap[currentView]);
+                            // Add Merge Duplicates button for Finished Goods
+                            if (currentView === 'finished-goods') {
+                                setTimeout(() => {
+                                    const buttons = document.querySelectorAll('button[onclick*="toggleReorderMode"]');
+                                    if (buttons.length > 0) {
+                                        const reorderBtn = buttons[buttons.length - 1];
+                                        if (reorderBtn && !document.getElementById('merge-duplicates-btn-fg')) {
+                                            const mergeBtn = document.createElement('button');
+                                            mergeBtn.id = 'merge-duplicates-btn-fg';
+                                            mergeBtn.className = 'px-4 py-2 bg-red-600 text-white rounded-md w-full';
+                                            mergeBtn.textContent = '⚙️ Merge Duplicates';
+                                            mergeBtn.onclick = () => {
+                                                if (typeof openMergeDuplicatesModal === 'function') {
+                                                    openMergeDuplicatesModal();
+                                                }
+                                            };
+                                            reorderBtn.parentNode.appendChild(mergeBtn);
+                                            console.log('✅ Merge Duplicates button added to Finished Goods');
+                                        }
+                                    }
+                                }, 50);
+                            }
                         } else if (currentView === 'dashboard') {
                             renderDashboard();
                         } else if (currentView === 'alerts') {
@@ -4979,7 +5039,7 @@
                                     <div class="text-xs text-gray-500">Min: ${alert.item.minStockLevel}</div>
                                 </div>
                                 <span class="px-2 py-1 text-xs font-bold rounded bg-red-100 text-red-700">
-                                    ${(alert.closingStock || 0).toFixed(2)} ${alert.item.unit}
+                                    ${(Math.abs(alert.closingStock) < 0.001 ? 0 : alert.closingStock).toFixed(2)} ${alert.item.unit}
                                 </span>
                             </div>`).join('') : '<p class="text-gray-400 text-center py-4">All stocks healthy.</p>'}
                     </div>
@@ -5409,6 +5469,7 @@
                     <div class="flex gap-2">
                         <button onclick="openAddItemModal('${category}')" class="px-4 py-2 bg-green-600 text-white rounded-md w-full">Add New Item</button>
                         <button onclick="toggleReorderMode('${category}')" id="${category}-reorder-btn" class="px-4 py-2 ${isReorderMode ? 'bg-green-600' : 'bg-purple-600'} text-white rounded-md w-full">${isReorderMode ? 'Done Reordering' : 'Reorder Items'}</button>
+                        ${category === 'finishedGoods' ? `<button onclick="openMergeDuplicatesModal()" class="px-4 py-2 bg-red-600 text-white rounded-md w-full">Merge Duplicates</button>` : ''}
                     </div>
                 </div>
                 <div class="flex items-center space-x-4 mb-4">
@@ -5446,6 +5507,21 @@
                         document.getElementById(`${category}-show-negative-stock`).addEventListener('change', () => renderTableBody(category));
                         document.getElementById(`${category}-show-below-min`).addEventListener('change', () => renderTableBody(category));
                         renderTableBody(category);
+                        
+                        // Inject Merge Duplicates button for Finished Goods
+                        if (category === 'finishedGoods') {
+                            setTimeout(() => {
+                                const buttonContainer = document.querySelector(`[class*="flex gap-2"]`);
+                                if (buttonContainer && !document.getElementById('merge-duplicates-btn')) {
+                                    const mergeBtn = document.createElement('button');
+                                    mergeBtn.id = 'merge-duplicates-btn';
+                                    mergeBtn.className = 'px-4 py-2 bg-red-600 text-white rounded-md w-full';
+                                    mergeBtn.textContent = 'Merge Duplicates';
+                                    mergeBtn.onclick = () => openMergeDuplicatesModal();
+                                    buttonContainer.appendChild(mergeBtn);
+                                }
+                            }, 100);
+                        }
                     }
 
                     function renderTableBody(category) {
@@ -6763,7 +6839,7 @@
 
                     function renderFormulationsView() {
                         const container = document.getElementById('formulations-view');
-                        const formulas = appState.formulas || [];
+                        const formulas = (appState.formulas || []).slice().sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
                         const productsOptions = formulas.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
                         container.innerHTML = `
             <h2 class="text-3xl font-bold mb-6">Formulations & Production</h2>
@@ -6869,9 +6945,10 @@
                     function renderFormulasTable() {
                         const tableBody = document.getElementById('formulas-table-body');
                         if (!tableBody) return;
-                        const searchFilter = document.getElementById('formula-search-filter').value.toLowerCase();
-                        let formulas = appState.formulas || [];
-                        const filteredFormulas = formulas.filter(formula => formula.name.toLowerCase().includes(searchFilter));
+                        const searchInput = document.getElementById('formula-search-filter');
+                        const searchFilter = (searchInput ? searchInput.value : '').toLowerCase();
+                        const formulas = (appState.formulas || []).slice().sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
+                        const filteredFormulas = formulas.filter(formula => String(formula?.name || '').toLowerCase().includes(searchFilter));
 
                         // NOTE: This view strictly uses Master Data (findItem)
                         // Calculator overrides are intentionally IGNORED here to preserve data integrity.
@@ -7315,6 +7392,103 @@
                         openModal('addItemModal');
                     }
                     window.openAddItemModal = openAddItemModal;
+
+                    function openMergeDuplicatesModal() {
+                        if (!checkPermission()) return;
+                        const fgItems = appState.inventory.finishedGoods || [];
+                        const primarySelect = document.getElementById('merge-primary-product');
+                        const duplicateSelect = document.getElementById('merge-duplicate-product');
+                        
+                        primarySelect.innerHTML = '<option value="">-- Select Primary Product --</option>';
+                        duplicateSelect.innerHTML = '<option value="">-- Select Duplicate Product --</option>';
+                        
+                        fgItems.forEach(item => {
+                            primarySelect.innerHTML += `<option value="${item.id}">${item.name}</option>`;
+                            duplicateSelect.innerHTML += `<option value="${item.id}">${item.name}</option>`;
+                        });
+                        
+                        document.getElementById('merge-preview').classList.add('hidden');
+                        primarySelect.addEventListener('change', updateMergePreview);
+                        duplicateSelect.addEventListener('change', updateMergePreview);
+                        
+                        openModal('mergeDuplicatesModal');
+                    }
+                    window.openMergeDuplicatesModal = openMergeDuplicatesModal;
+
+                    function updateMergePreview() {
+                        const primaryId = document.getElementById('merge-primary-product').value;
+                        const duplicateId = document.getElementById('merge-duplicate-product').value;
+                        
+                        if (!primaryId || !duplicateId || primaryId === duplicateId) {
+                            document.getElementById('merge-preview').classList.add('hidden');
+                            return;
+                        }
+                        
+                        const primaryItem = findItem('finishedGoods', primaryId);
+                        const duplicateItem = findItem('finishedGoods', duplicateId);
+                        
+                        if (!primaryItem || !duplicateItem) return;
+                        
+                        const duplicateTxCount = appState.transactions.filter(tx => 
+                            tx.category === 'finishedGoods' && String(tx.itemId) === String(duplicateId)
+                        ).length;
+                        
+                        document.getElementById('merge-preview-primary').textContent = primaryItem.name;
+                        document.getElementById('merge-preview-duplicate').textContent = duplicateItem.name;
+                        document.getElementById('merge-preview-count').textContent = duplicateTxCount;
+                        document.getElementById('merge-preview').classList.remove('hidden');
+                    }
+
+                    function performMergeDuplicates() {
+                        const primaryId = document.getElementById('merge-primary-product').value;
+                        const duplicateId = document.getElementById('merge-duplicate-product').value;
+                        
+                        if (!primaryId || !duplicateId || primaryId === duplicateId) {
+                            showAlert('Please select different Primary and Duplicate products.');
+                            return;
+                        }
+                        
+                        const primaryItem = findItem('finishedGoods', primaryId);
+                        const duplicateItem = findItem('finishedGoods', duplicateId);
+                        
+                        if (!primaryItem || !duplicateItem) {
+                            showAlert('Error: Products not found.');
+                            return;
+                        }
+                        
+                        try {
+                            // Step 1: Reassign all transactions from duplicate to primary
+                            let txMoved = 0;
+                            appState.transactions.forEach(tx => {
+                                if (tx.category === 'finishedGoods' && String(tx.itemId) === String(duplicateId)) {
+                                    tx.itemId = primaryId;
+                                    txMoved++;
+                                }
+                            });
+                            
+                            // Step 2: Remove duplicate item from inventory
+                            const duplicateIndex = appState.inventory.finishedGoods.findIndex(item => String(item.id) === String(duplicateId));
+                            if (duplicateIndex > -1) {
+                                appState.inventory.finishedGoods.splice(duplicateIndex, 1);
+                            }
+                            
+                            // Step 3: Save state
+                            saveState();
+                            
+                            // Step 4: Close modal and show success
+                            closeModal('mergeDuplicatesModal');
+                            showAlert(`Merge Complete!\n\n✓ Moved ${txMoved} transactions\n✓ Removed "${duplicateItem.name}"\n✓ All data now under "${primaryItem.name}"\n\nPlease refresh to verify all stocks are correct.`);
+                            
+                            // Step 5: Refresh inventory view
+                            logActivity('Merge Duplicates', `Merged "${duplicateItem.name}" into "${primaryItem.name}" (${txMoved} transactions moved)`);
+                            renderInventoryView('finishedGoods');
+                            
+                        } catch (error) {
+                            console.error('Merge error:', error);
+                            showAlert(`Error during merge: ${error.message}`);
+                        }
+                    }
+                    window.performMergeDuplicates = performMergeDuplicates;
 
                     function openEditItemModal(category, id) {
                         if (!checkPermission()) return;
@@ -10898,6 +11072,16 @@
                                 return String(v || '').trim().toLowerCase();
                             };
 
+                            // Strict name normalization: case-insensitive, punctuation-insensitive,
+                            // and whitespace-normalized. No fuzzy fallback to avoid wrong formula mapping.
+                            const normStrict = function (v) {
+                                return String(v || '')
+                                    .toLowerCase()
+                                    .replace(/[^a-z0-9\s]/g, ' ')
+                                    .replace(/\s+/g, ' ')
+                                    .trim();
+                            };
+
                             const linkedId = item.linkedFormulaId != null ? item.linkedFormulaId : item.formulaId;
                             if (linkedId != null && String(linkedId).trim() !== '') {
                                 const byId = formulas.find(f => String(f.id) === String(linkedId));
@@ -10912,7 +11096,19 @@
 
                             const itemName = norm(item.name);
                             if (!itemName) return null;
-                            return formulas.find(f => norm(f.name) === itemName) || null;
+
+                            // Exact match first.
+                            const exactMatch = formulas.find(f => norm(f.name) === itemName);
+                            if (exactMatch) return exactMatch;
+
+                            // Strict normalized exact match (handles punctuation/spacing differences only).
+                            const strictItemName = normStrict(item.name);
+                            if (!strictItemName) return null;
+                            const strictMatch = formulas.find(f => normStrict(f.name) === strictItemName);
+                            if (strictMatch) return strictMatch;
+
+                            // Intentionally no fuzzy fallback: better to ask user than apply wrong formula.
+                            return null;
                         };
                     }
 
@@ -18499,6 +18695,7 @@
 
                         const rows = document.querySelectorAll('#calc-details-body tr');
                         const data = [];
+                        const planningMode = !!window.calcProductionPlanningMode;
 
                         rows.forEach(r => {
                             const cells = r.querySelectorAll('td');
@@ -18506,14 +18703,24 @@
                                 // Parse name strictly
                                 let name = cells[0].innerText.split('\n')[0].trim();
                                 let rate = cells[1].innerText.trim();
-                                // Remove 'Edit' text if scraped
 
-                                data.push({
+                                const reqIdx = 2;
+                                const availIdx = planningMode ? 3 : -1;
+                                const totalIdx = planningMode ? 4 : 3;
+
+                                const rowObj = {
                                     'Item Name': name,
-                                    'Cost/Unit': parseFloat(rate.replace(/[^0-9.]/g, '')), // Clean currency
-                                    'Quantity': parseFloat(cells[2].innerText.split('\n')[0].replace(/[^0-9.]/g, '')),
-                                    'Total Cost': parseFloat(cells[3].innerText.replace(/[^0-9.]/g, ''))
-                                });
+                                    'Cost/Unit': parseFloat(rate.replace(/[^0-9.]/g, '')),
+                                    'Quantity': parseFloat(cells[reqIdx].innerText.split('\n')[0].replace(/[^0-9.]/g, '')),
+                                    'Total Cost': parseFloat(cells[totalIdx].innerText.replace(/[^0-9.]/g, ''))
+                                };
+
+                                if (planningMode) {
+                                    const availTxt = cells[availIdx] ? cells[availIdx].innerText.split('\n')[0] : '';
+                                    rowObj['Available Qty'] = parseFloat(String(availTxt).replace(/[^0-9.]/g, ''));
+                                }
+
+                                data.push(rowObj);
                             }
                         });
 
@@ -18713,12 +18920,19 @@
                         calculateCostEstimateStrict();
                     };
 
+                    window.toggleCalcProductionPlanning = function () {
+                        const el = document.getElementById('calc-production-planning-toggle');
+                        window.calcProductionPlanningMode = !!(el && el.checked);
+                        calculateCostEstimateStrict();
+                    };
+
                     window.renderCalculatorView = function () {
                         const container = document.getElementById('calculator-view');
                         if (!container) return;
 
                         // Ensure overrides
                         if (!window.calculatorOverrides) window.calculatorOverrides = {};
+                        if (typeof window.calcProductionPlanningMode === 'undefined') window.calcProductionPlanningMode = false;
 
                         container.innerHTML = `
         <div class="h-full flex flex-col p-4 md:p-8 overflow-y-auto bg-gray-50 font-sans">
@@ -18765,6 +18979,13 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="mt-4 p-3 bg-indigo-50 border border-indigo-100 rounded-lg">
+                            <label class="flex items-center gap-3 cursor-pointer">
+                                <input type="checkbox" id="calc-production-planning-toggle" ${window.calcProductionPlanningMode ? 'checked' : ''} onchange="toggleCalcProductionPlanning()" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                                <span class="text-sm font-bold text-indigo-800">Production Planning Mode</span>
+                            </label>
+                            <p class="text-xs text-indigo-700 mt-1">Adds Available Qty next to Required Qty and includes it in Excel export.</p>
+                        </div>
                     </div>
 
                     <!-- 2. Ingredients (BOM) -->
@@ -18778,12 +18999,13 @@
                                     <th class="p-4 text-left font-medium">Item Details</th>
                                     <th class="p-4 text-right font-medium">Rate/Unit</th>
                                     <th class="p-4 text-right font-medium">Qty Required</th>
+                                    <th id="calc-th-available" class="p-4 text-right font-medium ${window.calcProductionPlanningMode ? '' : 'hidden'}">Available Qty</th>
                                     <th class="p-4 text-right font-medium">Subtotal</th>
                                     <th class="p-4 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody id="calc-details-body" class="divide-y divide-gray-50">
-                                <tr><td colspan="5" class="p-8 text-center text-gray-400 italic">Select a formulation to load BOM.</td></tr>
+                                <tr><td colspan="${window.calcProductionPlanningMode ? 6 : 5}" class="p-8 text-center text-gray-400 italic">Select a formulation to load BOM.</td></tr>
                             </tbody>
                         </table>
                         
@@ -18939,12 +19161,19 @@
                     window.calculateCostEstimateStrict = function () {
                         const formId = document.getElementById('calc-formulation-select').value;
                         const qty = parseFloat(document.getElementById('calc-qty').value) || 0;
+                        const planningMode = !!window.calcProductionPlanningMode;
 
                         if (!formId || qty <= 0) {
-                            document.getElementById('calc-details-body').innerHTML = '<tr><td colspan="5" class="p-8 text-center text-gray-400 italic">Select a formulation to load BOM.</td></tr>';
+                            const emptyCols = planningMode ? 6 : 5;
+                            document.getElementById('calc-details-body').innerHTML = `<tr><td colspan="${emptyCols}" class="p-8 text-center text-gray-400 italic">Select a formulation to load BOM.</td></tr>`;
+                            const thAvail = document.getElementById('calc-th-available');
+                            if (thAvail) thAvail.classList.toggle('hidden', !planningMode);
                             resetSummary();
                             return;
                         }
+
+                        const thAvail = document.getElementById('calc-th-available');
+                        if (thAvail) thAvail.classList.toggle('hidden', !planningMode);
 
                         const formula = appState.formulas.find(f => f.id == formId);
                         if (!formula) return;
@@ -18995,7 +19224,12 @@
                                     const cost = req * rate;
                                     totalMaterialCost += cost;
 
-                                    rows += generateCalcRow(item.name, item.id, item.unit, req, rate, cost, isOverridden, formId, itemEntry.itemId, isQtyOverridden);
+                                    const stockInfo = (typeof window.calculateStock === 'function')
+                                        ? window.calculateStock(item, catName, (typeof getToday === 'function' ? getToday() : undefined))
+                                        : { closingStock: 0 };
+                                    const availableQty = parseFloat(stockInfo && stockInfo.closingStock) || 0;
+
+                                    rows += generateCalcRow(item.name, item.id, item.unit, req, rate, cost, isOverridden, formId, itemEntry.itemId, isQtyOverridden, availableQty, planningMode);
                                 }
                             });
                         };
@@ -19005,7 +19239,7 @@
 
                         // 2. Process Manual Ingredients (From Session)
                         if (window.calcSession.manualIngredients && window.calcSession.manualIngredients.length > 0) {
-                            rows += `<tr class="bg-blue-50"><td colspan="5" class="p-2 text-xs font-bold text-blue-600 uppercase tracking-widest pl-4">Manual Additions</td></tr>`;
+                            rows += `<tr class="bg-blue-50"><td colspan="${planningMode ? 6 : 5}" class="p-2 text-xs font-bold text-blue-600 uppercase tracking-widest pl-4">Manual Additions</td></tr>`;
 
                             window.calcSession.manualIngredients.forEach((m, idx) => {
                                 const cost = m.qty * m.rate;
@@ -19021,6 +19255,7 @@
                         <div class="text-gray-600">₹${m.rate.toFixed(2)}</div>
                     </td>
                     <td class="p-4 text-right font-mono align-top">${m.qty.toFixed(3)}</td>
+                    ${planningMode ? `<td class="p-4 text-right font-mono align-top text-gray-400">-</td>` : ''}
                     <td class="p-4 text-right font-bold text-gray-800 align-top">₹${cost.toFixed(2)}</td>
                     <td class="p-4 text-center">
                         <button onclick="removeManualIngredient(${idx})" class="text-red-300 hover:text-red-500 transition">
@@ -19040,7 +19275,7 @@
                         updateAdditionalCosts();
                     };
 
-                    function generateCalcRow(name, id, unit, qty, rate, cost, isOverridden, formId, itemId, isQtyOverridden) {
+                    function generateCalcRow(name, id, unit, qty, rate, cost, isOverridden, formId, itemId, isQtyOverridden, availableQty, planningMode) {
                         return `
     <tr class="hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0">
         <td class="p-4">
@@ -19067,6 +19302,7 @@
                 </button>
             </div>
         </td>
+        ${planningMode ? `<td class="p-4 text-right font-mono text-gray-700 align-top">${availableQty.toFixed(3)} <span class="text-xs text-gray-400">${unit}</span></td>` : ''}
         <td class="p-4 text-right font-bold text-gray-800 align-top">₹${cost.toFixed(2)}</td>
         <td class="p-4 text-center">
              ${isOverridden || isQtyOverridden ?
@@ -19261,8 +19497,11 @@
                     window.generateProCostSheetPDF = function () {
                         const formId = document.getElementById('calc-formulation-select').value;
                         if (!formId) return;
+                        const planningMode = !!window.calcProductionPlanningMode;
+                        const originalTitle = document.title;
 
                         const formula = appState.formulas.find(f => f.id == formId);
+                        const safeBaseName = String((formula && formula.name) || 'Costing_Sheet').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
                         const date = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
                         const targetQty = document.getElementById('calc-qty').value;
                         const unit = document.getElementById('calc-unit-display').textContent;
@@ -19281,12 +19520,22 @@
                             // Clone TR content but strip buttons
                             const tds = tr.querySelectorAll('td');
                             if (tds.length > 3) {
+                                const rateIdx = 1;
+                                const qtyIdx = 2;
+                                const availIdx = planningMode ? 3 : -1;
+                                const totalIdx = planningMode ? 4 : 3;
+                                const itemName = (tds[0].querySelector('.font-bold') ? tds[0].querySelector('.font-bold').textContent : tds[0].innerText).trim();
+                                const rateText = String(tds[rateIdx].innerText || '').replace(/\s+/g, ' ').trim();
+                                const qtyText = String(tds[qtyIdx].innerText || '').replace(/\s+/g, ' ').trim();
+                                const availText = planningMode ? String((tds[availIdx] && tds[availIdx].innerText) || '-').replace(/\s+/g, ' ').trim() : '';
+                                const totalText = String(tds[totalIdx].innerText || '').replace(/\s+/g, ' ').trim();
                                 tableRows += `
             <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 10px; color: #333;">${tds[0].querySelector('.font-bold').textContent}</td>
-                <td style="padding: 10px; text-align:right;">${tds[1].innerText.split('₹')[1] || tds[1].innerText}</td> <!-- Rate -->
-                <td style="padding: 10px; text-align:right;">${tds[2].innerText}</td> <!-- Qty -->
-                <td style="padding: 10px; text-align:right; font-weight:bold;">${tds[3].innerText}</td> <!-- Cost -->
+                <td style="padding: 10px; color: #333; white-space: normal; word-break: break-word;">${itemName}</td>
+                <td style="padding: 10px; text-align:right; white-space: nowrap;">${rateText.split('₹')[1] || rateText}</td>
+                <td style="padding: 10px; text-align:right; white-space: nowrap;">${qtyText}</td>
+                ${planningMode ? `<td style="padding: 10px; text-align:right; white-space: nowrap;">${availText}</td>` : ''}
+                <td style="padding: 10px; text-align:right; font-weight:bold; white-space: nowrap;">${totalText}</td>
             </tr>
             `;
                             }
@@ -19332,13 +19581,21 @@
 
         <!-- Detailed BOM -->
         <h3 style="font-size: 14px; text-transform: uppercase; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 15px;">Bill of Materials & Cost Breakdown</h3>
-        <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 40px;">
+        <table style="width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; margin-bottom: 40px;">
+            ${planningMode
+                                ? `<colgroup>
+                    <col style="width:38%"><col style="width:14%"><col style="width:16%"><col style="width:18%"><col style="width:14%">
+                </colgroup>`
+                                : `<colgroup>
+                    <col style="width:46%"><col style="width:16%"><col style="width:20%"><col style="width:18%">
+                </colgroup>`}
             <thead>
                 <tr style="background: #f1f5f9;">
-                    <th style="text-align: left; padding: 10px; border-bottom: 2px solid #cbd5e1;">Item Description</th>
-                    <th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1;">Rate</th>
-                    <th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1;">Qty</th>
-                    <th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1;">Total</th>
+                    <th style="text-align: left; padding: 10px; border-bottom: 2px solid #cbd5e1; white-space: nowrap;">Item Description</th>
+                    <th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1; white-space: nowrap;">Rate</th>
+                    <th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1; white-space: nowrap;">Qty</th>
+                    ${planningMode ? '<th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1; white-space: nowrap;">Available Qty</th>' : ''}
+                    <th style="text-align: right; padding: 10px; border-bottom: 2px solid #cbd5e1; white-space: nowrap;">Total</th>
                 </tr>
             </thead>
             <tbody>
@@ -19388,7 +19645,16 @@
     </style>
     `;
 
+                        const cleanupProOverlay = function () {
+                            document.title = originalTitle;
+                            const existingOverlay = document.getElementById('pro-print-overlay');
+                            if (existingOverlay && existingOverlay.parentNode) {
+                                existingOverlay.parentNode.removeChild(existingOverlay);
+                            }
+                        };
+
                         document.body.appendChild(overlay);
+                        document.title = safeBaseName + '_Costing_Sheet';
                         window.print();
                         // Cleanup
                         setTimeout(() => {
@@ -19396,9 +19662,12 @@
                             const btn = document.createElement('button');
                             btn.textContent = "Close Preview (After Print)";
                             btn.style.cssText = "position:fixed; top:20px; right:20px; background:red; color:white; padding:10px; z-index:10000; cursor:pointer;";
-                            btn.onclick = () => document.body.removeChild(overlay);
+                            btn.onclick = cleanupProOverlay;
                             overlay.appendChild(btn);
                         }, 1000);
+                        setTimeout(() => {
+                            document.title = originalTitle;
+                        }, 1500);
                     };
 
                     console.log("ANTIGRAVITY: Feature Pack V10 (Final) Loaded.");
@@ -21668,6 +21937,17 @@
                                     var typeLabel = String(typeVal).toUpperCase();
                                     var dateVal = t.date || t.Date || t.timestamp;
                                     var qtyVal = t.quantity !== undefined && t.quantity !== null ? t.quantity : (t.qty !== undefined ? t.qty : 0);
+                                    var cust = t.customerName || t.customer || t.buyerName || ((appState.customers || []).find(function (c) { return c && c.id == t.customerId; }) || {}).name || '';
+                                    var supplier = t.supplierName || t.supplier || ((appState.suppliers || []).find(function (s) { return s && s.id == t.supplierId; }) || {}).name || '';
+                                    var party = cust || supplier || '';
+                                    var noteBase = t.details || t.notes || t.reason || '';
+                                    var dispatchMeta = [];
+                                    if (String(typeVal).toLowerCase() === 'dispatch') {
+                                        if (party) dispatchMeta.push('Customer: ' + party);
+                                        if (t.subtype) dispatchMeta.push('Purpose: ' + t.subtype);
+                                        if (t.invoiceNo) dispatchMeta.push('Invoice/DC: ' + t.invoiceNo);
+                                    }
+                                    var noteFull = [noteBase].concat(dispatchMeta).filter(Boolean).join(' | ') || '-';
 
                                     return `
                                     <tr class="hover:bg-blue-50 transition duration-150">
@@ -21675,7 +21955,7 @@
                                         <td class="p-4 font-bold text-xs ${typeColor}">${typeLabel}</td>
                                         <td class="p-4 text-right font-mono font-medium text-gray-800">${parseFloat(qtyVal).toFixed(3)}</td>
                                         <td class="p-4 font-mono text-xs text-gray-500">${t.batchNo || t.ref || '-'}</td>
-                                        <td class="p-4 text-gray-600 italic max-w-xs truncate" title="${t.details || t.notes || ''}">${t.details || t.notes || t.reason || '-'}</td>
+                                        <td class="p-4 text-gray-600 italic max-w-xs truncate" title="${noteFull}">${noteFull}</td>
                                         <td class="p-4 text-xs text-gray-500">${t.user || t.userName || 'Unknown'}</td>
                                         <td class="p-4 text-center">
                                             <div class="flex justify-center gap-2">
@@ -22042,18 +22322,19 @@
                 <h2 class="text-2xl font-bold mb-4 text-gray-800">Stock Aging Analysis</h2>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div class="bg-green-50 p-4 rounded border border-green-200">
-                        <h3 class="text-sm font-bold text-green-700">Active Stock (< 30 Days)</h3>
+                        <h3 class="text-sm font-bold text-green-700">Fast Moving (Monthly Usage >= 25%)</h3>
                         <p class="text-2xl font-bold" id="age-fresh-val">₹0</p>
                     </div>
                     <div class="bg-yellow-50 p-4 rounded border border-yellow-200">
-                        <h3 class="text-sm font-bold text-yellow-700">Aging (30-90 Days)</h3>
+                        <h3 class="text-sm font-bold text-yellow-700">Slow / Low Moving</h3>
                         <p class="text-2xl font-bold" id="age-aging-val">₹0</p>
                     </div>
                     <div class="bg-red-50 p-4 rounded border border-red-200">
-                        <h3 class="text-sm font-bold text-red-700">Dead Stock (> 90 Days)</h3>
+                        <h3 class="text-sm font-bold text-red-700">Dead Stock (No significant usage > 180 days)</h3>
                         <p class="text-2xl font-bold" id="age-dead-val">₹0</p>
                     </div>
                 </div>
+                <p class="text-xs text-gray-500 mb-4">Significant usage threshold per item = max(0.1 unit, 2% of current stock). Tiny usage will not reset dead stock status.</p>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm text-left">
                         <thead class="bg-gray-100 text-gray-700 uppercase">
@@ -22061,8 +22342,9 @@
                                 <th class="p-3">Category</th>
                                 <th class="p-3">Item Name</th>
                                 <th class="p-3 text-right">Current Stock</th>
-                                <th class="p-3 text-right">Activity</th>
-                                <th class="p-3 text-center">Inactivity (Days)</th>
+                                <th class="p-3 text-right">Monthly Usage %</th>
+                                <th class="p-3 text-right">Last Significant Usage</th>
+                                <th class="p-3 text-center">No-Use Days</th>
                                 <th class="p-3 text-center">Status</th>
                             </tr>
                         </thead>
@@ -22076,36 +22358,58 @@
                         var tbody = document.getElementById('aging-table-body');
                         var totalFresh = 0, totalAging = 0, totalDead = 0;
                         var rows = '';
+                        var outflowTypes = ['consume', 'dispatch', 'production-consume', 'requisition-issue', 'stock-take-adj-out'];
+                        var now = new Date();
+                        var last30 = new Date(now);
+                        last30.setDate(last30.getDate() - 30);
 
-                        ['rawMaterials', 'packingMaterials', 'finishedGoods'].forEach(function (cat) {
+                        ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods'].forEach(function (cat) {
                             if (!appState.inventory[cat]) return;
                             appState.inventory[cat].forEach(function (item) {
                                 var stockData = window.calculateStock(item, cat);
                                 if (stockData.closingStock <= 0) return;
 
-                                // LOGIC UPDATE: Use Last Activity (Receive OR Usage)
-                                var lastActivity = new Date(item.openingStockDate || new Date());
                                 var txs = appState.transactions || [];
-                                // Find ANY transaction for this item (Receive, Consume, etc)
-                                var itemTxs = txs.filter(t => t.itemId == item.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+                                var itemTxs = txs.filter(function (t) {
+                                    return t && t.category === cat && String(t.itemId) === String(item.id);
+                                });
 
-                                if (itemTxs.length > 0) {
-                                    lastActivity = new Date(itemTxs[0].date);
-                                }
+                                var significantQty = Math.max(0.1, stockData.closingStock * 0.02);
+                                var monthlyOutflowQty = itemTxs
+                                    .filter(function (t) {
+                                        var dt = new Date(t.date || 0);
+                                        return outflowTypes.indexOf(String(t.type || '').toLowerCase()) >= 0 && dt >= last30;
+                                    })
+                                    .reduce(function (sum, t) {
+                                        var q = parseFloat(t.quantity || 0);
+                                        if (isNaN(q)) q = 0;
+                                        return sum + Math.abs(q);
+                                    }, 0);
 
-                                var daysSinceActivity = Math.floor((new Date() - lastActivity) / (1000 * 60 * 60 * 24));
+                                var sigUseTx = itemTxs
+                                    .filter(function (t) {
+                                        if (outflowTypes.indexOf(String(t.type || '').toLowerCase()) < 0) return false;
+                                        var q = parseFloat(t.quantity || 0);
+                                        if (isNaN(q)) q = 0;
+                                        return Math.abs(q) >= significantQty;
+                                    })
+                                    .sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
+
+                                var lastSignificantUse = sigUseTx.length > 0 ? new Date(sigUseTx[0].date) : new Date(item.openingStockDate || now);
+                                var daysSinceUse = Math.floor((now - lastSignificantUse) / (1000 * 60 * 60 * 24));
+                                var monthlyUsagePct = stockData.closingStock > 0 ? (monthlyOutflowQty / stockData.closingStock) * 100 : 0;
                                 var valuation = stockData.closingStock * (parseFloat(item.currentAverageCost) || parseFloat(item.price) || 0);
 
                                 var statusBadge = '';
-                                if (daysSinceActivity < 30) {
-                                    statusBadge = '<span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">Active</span>';
-                                    totalFresh += valuation;
-                                } else if (daysSinceActivity < 90) {
-                                    statusBadge = '<span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-bold">Aging</span>';
-                                    totalAging += valuation;
-                                } else {
+                                if (daysSinceUse > 180) {
                                     statusBadge = '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold">Dead Stock</span>';
                                     totalDead += valuation;
+                                } else if (monthlyUsagePct >= 25) {
+                                    statusBadge = '<span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">Fast Moving</span>';
+                                    totalFresh += valuation;
+                                } else {
+                                    statusBadge = '<span class="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-bold">Slow / Low Moving</span>';
+                                    totalAging += valuation;
                                 }
 
                                 rows += `
@@ -22113,15 +22417,16 @@
                         <td class="p-3 text-xs text-gray-500 uppercase">${cat}</td>
                         <td class="p-3 font-medium">${item.name}</td>
                         <td class="p-3 text-right font-mono">${stockData.closingStock.toFixed(2)} ${item.unit}</td>
-                        <td class="p-3 text-right text-xs text-gray-500">${lastActivity.toISOString().split('T')[0]}</td>
-                        <td class="p-3 text-center text-gray-600">${daysSinceActivity}</td>
+                        <td class="p-3 text-right text-xs text-gray-700 font-semibold">${monthlyUsagePct.toFixed(1)}%</td>
+                        <td class="p-3 text-right text-xs text-gray-500">${lastSignificantUse.toISOString().split('T')[0]}</td>
+                        <td class="p-3 text-center text-gray-600">${daysSinceUse}</td>
                         <td class="p-3 text-center">${statusBadge}</td>
                     </tr>
                 `;
                             });
                         });
 
-                        tbody.innerHTML = rows || '<tr><td colspan="6" class="p-8 text-center text-gray-400">No stock found.</td></tr>';
+                        tbody.innerHTML = rows || '<tr><td colspan="7" class="p-8 text-center text-gray-400">No stock found.</td></tr>';
                         document.getElementById('age-fresh-val').textContent = '₹' + totalFresh.toFixed(0);
                         document.getElementById('age-aging-val').textContent = '₹' + totalAging.toFixed(0);
                         document.getElementById('age-dead-val').textContent = '₹' + totalDead.toFixed(0);
@@ -23875,16 +24180,30 @@
                         title = title || "Alert";
                         var modal = document.getElementById('genericMessageModal');
                         if (modal) {
-                            document.getElementById('generic-message-title').textContent = title;
-                            // Ensure message is treated as HTML only if intended, but for safety treat as text/br
-                            // Actually, we want to allow newlines
+                            var titleEl = document.getElementById('generic-modal-title');
+                            var messageEl = document.getElementById('generic-modal-message');
                             var contentDiv = document.getElementById('generic-message-content');
-                            if (message.includes('<')) {
-                                // Assume safe HTML if contains tags (rare for alerts)
-                                contentDiv.innerHTML = message;
-                            } else {
-                                contentDiv.innerHTML = message.replace(/\n/g, '<br>');
+                            var cancelBtn = document.getElementById('generic-modal-cancel');
+                            var confirmBtn = document.getElementById('generic-modal-confirm');
+
+                            if (titleEl) titleEl.textContent = title;
+                            // Always clear previous confirm/delete text and custom content first.
+                            if (messageEl) messageEl.textContent = String(message || '');
+                            if (contentDiv) contentDiv.innerHTML = '';
+
+                            // Force alert mode buttons (not confirm mode).
+                            if (cancelBtn) cancelBtn.classList.add('hidden');
+                            if (confirmBtn) {
+                                confirmBtn.textContent = 'OK';
+                                confirmBtn.onclick = function () {
+                                    if (typeof closeModal === 'function') closeModal('genericMessageModal');
+                                    else {
+                                        modal.classList.add('hidden');
+                                        modal.classList.remove('flex');
+                                    }
+                                };
                             }
+
                             modal.classList.remove('hidden');
                             modal.classList.add('flex');
                         } else {
@@ -25663,6 +25982,69 @@
                         }
                     };
 
+                    window.exportFormulasCsvForImport_v13 = function () {
+                        try {
+                            const formulas = (appState && Array.isArray(appState.formulas)) ? appState.formulas.slice() : [];
+                            if (!formulas.length) {
+                                alert("No formulas to export.");
+                                return;
+                            }
+
+                            const sortedFormulas = formulas.sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
+                            const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+                            const lines = ['Formula Name,Output Qty,Output Unit,Item Type,Item Name,Item Qty'];
+
+                            const findItemNameById = function (categoryKey, itemId) {
+                                const list = (appState && appState.inventory && appState.inventory[categoryKey]) ? appState.inventory[categoryKey] : [];
+                                const item = list.find(i => String(i.id) === String(itemId));
+                                return item ? (item.name || '') : '';
+                            };
+
+                            const pushRows = function (formula, typeLabel, categoryKey, arr) {
+                                (Array.isArray(arr) ? arr : []).forEach(entry => {
+                                    const qty = Number(entry && entry.quantity);
+                                    const itemName = findItemNameById(categoryKey, entry && entry.itemId);
+                                    lines.push([
+                                        esc(formula && formula.name),
+                                        esc(formula && formula.outputQty != null ? formula.outputQty : ''),
+                                        esc(formula && formula.outputUnit != null ? formula.outputUnit : ''),
+                                        esc(typeLabel),
+                                        esc(itemName),
+                                        esc(Number.isFinite(qty) ? qty : (entry && entry.quantity != null ? entry.quantity : ''))
+                                    ].join(','));
+                                });
+                            };
+
+                            sortedFormulas.forEach(f => {
+                                pushRows(f, 'Raw', 'rawMaterials', f.ingredients);
+                                pushRows(f, 'Packing', 'packingMaterials', f.packingMaterials);
+                                pushRows(f, 'Label', 'labels', f.labels);
+                            });
+
+                            const csv = lines.join('\n');
+                            const fileName = `miklens_formulas_import_ready_${new Date().toISOString().slice(0, 10)}.csv`;
+
+                            if (typeof downloadFile === 'function') {
+                                downloadFile(fileName, csv, 'text/csv;charset=utf-8;');
+                            } else {
+                                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = fileName;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                            }
+
+                            if (window.showToast) showToast('Formulas exported as import-ready CSV');
+                        } catch (e) {
+                            console.error(e);
+                            alert('Export failed: ' + (e.message || e));
+                        }
+                    };
+
                     // ----------------------------------------------------------------
                     // 3. EDIT & SAVE LOGIC (Re-implemented)
                     // ----------------------------------------------------------------
@@ -25765,9 +26147,12 @@
                         }
                     };
 
-                    window.renderFormulationsView = function () {
+                    window.renderFormulationsView = function (preserveSearchFocus) {
                         const container = document.getElementById('formulations-view');
                         if (!container) return;
+                        const allFormulas = (appState.formulas || []).slice().sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
+                        const formulaSearchTerm = String(window.formulaCardSearchTerm || '').trim().toLowerCase();
+                        const visibleFormulas = allFormulas.filter(f => String(f?.name || '').toLowerCase().includes(formulaSearchTerm));
 
                         container.innerHTML = `
         <div class="h-full flex flex-col p-6 overflow-y-auto bg-gray-50">
@@ -25780,6 +26165,10 @@
                     <p class="text-sm text-gray-500 mt-1">${(appState.formulas || []).length} formulas available</p>
                 </div>
                 <div class="flex gap-3">
+                    <button onclick="if(window.exportFormulasCsvForImport_v13) exportFormulasCsvForImport_v13()" class="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 font-bold flex items-center gap-2 transition-transform hover:scale-105">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Export CSV
+                    </button>
                     <button onclick="window.injectImportFormulaModal_v13(); openModal('importFormulaModal_v13')" class="px-4 py-2 bg-indigo-600 text-white rounded-lg shadow hover:bg-indigo-700 font-bold flex items-center gap-2 transition-transform hover:scale-105">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0L8 8m4-4v12"></path></svg>
                         Import CSV
@@ -25791,17 +26180,21 @@
                 </div>
             </div>
 
+            <div class="mb-6">
+                <input id="formula-card-search" type="text" value="${window.formulaCardSearchTerm || ''}" placeholder="Search formulas by name..." class="w-full md:w-[360px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500">
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                ${(appState.formulas || []).map(f => `
-                <div class="bg-white p-6 rounded-xl shadow border border-gray-100 hover:shadow-lg transition-shadow relative group">
+                ${visibleFormulas.map(f => `
+                <div onclick="if(window.openFormulaModal) openFormulaModal('${f.id}')" class="bg-white p-6 rounded-xl shadow border border-gray-100 hover:shadow-lg transition-shadow relative group cursor-pointer">
                     <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onclick="duplicateFormula('${f.id}')" class="p-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200" title="Duplicate">
+                        <button onclick="event.stopPropagation(); duplicateFormula('${f.id}')" class="p-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200" title="Duplicate">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                         </button>
-                        <button onclick="editFormula('${f.id}')" class="p-2 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" title="Edit">
+                        <button onclick="event.stopPropagation(); editFormula('${f.id}')" class="p-2 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" title="Edit">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                         </button>
-                        <button onclick="deleteFormula('${f.id}')" class="p-2 bg-red-100 text-red-600 rounded hover:bg-red-200" title="Delete">
+                        <button onclick="event.stopPropagation(); deleteFormula('${f.id}')" class="p-2 bg-red-100 text-red-600 rounded hover:bg-red-200" title="Delete">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                         </button>
                     </div>
@@ -25819,15 +26212,40 @@
                 </div>
                 `).join('')}
 
-                ${(!appState.formulas || appState.formulas.length === 0) ? `
+                ${(allFormulas.length === 0) ? `
                 <div class="col-span-full border-2 border-dashed border-gray-300 rounded-xl p-10 flex flex-col items-center justify-center text-gray-400">
                     <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547a2 2 0 00-.547 1.806l.477 2.387a6 6 0 00.517 3.86l.158.318a6 6 0 003.86.517l2.387.477a2 2 0 001.806-.547a2 2 0 00.547-1.806l-.477-2.387a6 6 0 00-.517-3.86l-.158-.318a6 6 0 01-.517-3.86l2.387-.477a2 2 0 001.022-.547z"></path></svg>
                     <p class="text-lg font-medium">No formulas yet.</p>
                     <button onclick="window.injectImportFormulaModal_v13(); openModal('importFormulaModal_v13')" class="mt-4 text-indigo-600 hover:underline">Import from CSV</button>
                 </div>
                 ` : ''}
+
+                ${(allFormulas.length > 0 && visibleFormulas.length === 0) ? `
+                <div class="col-span-full border-2 border-dashed border-gray-300 rounded-xl p-10 flex flex-col items-center justify-center text-gray-500">
+                    <p class="text-lg font-medium">No formulas found for this search.</p>
+                </div>
+                ` : ''}
             </div>
         </div>`;
+
+                        const formulaSearchInput = document.getElementById('formula-card-search');
+                        if (formulaSearchInput) {
+                            formulaSearchInput.addEventListener('input', function (e) {
+                                window.formulaCardSearchTerm = (e.target && e.target.value) ? e.target.value : '';
+                                window.formulaCardSearchCursor = (e.target && typeof e.target.selectionStart === 'number')
+                                    ? e.target.selectionStart
+                                    : String(window.formulaCardSearchTerm || '').length;
+                                window.renderFormulationsView(true);
+                            });
+
+                            if (preserveSearchFocus) {
+                                const cursorPos = Number.isFinite(window.formulaCardSearchCursor)
+                                    ? window.formulaCardSearchCursor
+                                    : String(window.formulaCardSearchTerm || '').length;
+                                formulaSearchInput.focus();
+                                try { formulaSearchInput.setSelectionRange(cursorPos, cursorPos); } catch (err) { }
+                            }
+                        }
                     };
 
                     // Replace Form Listener
