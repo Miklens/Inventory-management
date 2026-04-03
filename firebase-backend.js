@@ -682,6 +682,33 @@
     });
   }
 
+  async function postToAppsScript(url, payloadObj) {
+    var body = JSON.stringify(payloadObj || {});
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: body,
+        redirect: 'follow'
+      });
+      if (resp && resp.ok) return true;
+    } catch (e) {
+      // Ignore and try no-cors fallback below.
+    }
+
+    try {
+      await fetch(url, {
+        method: 'POST',
+        body: body,
+        mode: 'no-cors',
+        redirect: 'follow'
+      });
+      return true;
+    } catch (e2) {
+      return false;
+    }
+  }
+
   async function syncUsersToAppsScriptDirectory(force, currentUser) {
     var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
     var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
@@ -714,15 +741,10 @@
           });
         });
         if (!users.length) return false;
-        var body = JSON.stringify({ secret: secret, action: 'sync_recipients', users: users });
-        var resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: body,
-          redirect: 'follow'
-        });
-        if (!resp.ok) return false;
+        var okAll = await postToAppsScript(url, { secret: secret, action: 'sync_recipients', users: users });
+        if (!okAll) return false;
         if (canUseStorage) global.localStorage.setItem(syncKey, String(now));
+        console.log('[SYNC] Apps Script recipient sync (all users):', users.length);
         return true;
       } catch (e) {
         console.warn('syncUsersToAppsScriptDirectory (all) failed', e);
@@ -738,13 +760,9 @@
         name: String(currentUser.name || '').trim(),
         role: String(currentUser.role || '').trim()
       }];
-      var singleBody = JSON.stringify({ secret: secret, action: 'sync_recipients', users: singleUser });
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: singleBody,
-        redirect: 'follow'
-      });
+      var okSelf = await postToAppsScript(url, { secret: secret, action: 'sync_recipients', users: singleUser });
+      if (!okSelf) return false;
+      console.log('[SYNC] Apps Script recipient sync (self):', singleUser[0].email);
       return true;
     } catch (e) {
       console.warn('syncUsersToAppsScriptDirectory (self) failed', e);
