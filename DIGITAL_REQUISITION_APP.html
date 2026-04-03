@@ -14,10 +14,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260403_03"></script>
+    <script src="firebase-backend.js?v=20260403_04"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-    window.__REQ_APP_BUILD__ = '2026-04-03_03';
+    window.__REQ_APP_BUILD__ = '2026-04-03_04';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
@@ -691,7 +691,21 @@
                         body: JSON.stringify(payload),
                         redirect: 'follow'
                     });
-                    if (resp && resp.ok) return true;
+                    if (resp && resp.ok) {
+                        try {
+                            const txt = await resp.text();
+                            const j = txt ? JSON.parse(txt) : {};
+                            if (j && (j.ok === true || j.result === 'success')) return true;
+                            if (j && j.error) {
+                                console.warn('[SYNC_DIRECT][AppsScript] response error:', j.error);
+                                return false;
+                            }
+                            return false;
+                        } catch (_) {
+                            console.warn('[SYNC_DIRECT][AppsScript] non-JSON response');
+                            return false;
+                        }
+                    }
                 } catch (_) {
                     // Continue to no-cors fallback.
                 }
@@ -702,7 +716,8 @@
                     mode: 'no-cors',
                     redirect: 'follow'
                 });
-                return true;
+                // no-cors is opaque; cannot confirm success.
+                return false;
             } catch (_) {
                 return false;
             }
