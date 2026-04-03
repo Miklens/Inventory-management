@@ -724,6 +724,24 @@
     }
   }
 
+  async function sendAutoBackupEmail(payload) {
+    var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
+    var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
+    if (!url || !secret) return fail(new Error('Apps Script email endpoint is not configured'));
+
+    var dataStr = (payload && payload.data != null) ? String(payload.data) : '';
+    if (!dataStr) return fail(new Error('Missing backup data'));
+
+    var okSend = await postToAppsScript(url, {
+      secret: secret,
+      action: 'auto_backup_email',
+      data: dataStr
+    });
+
+    if (!okSend) return fail(new Error('Backup email request failed at Apps Script endpoint'));
+    return ok({ message: 'Backup email request accepted' });
+  }
+
   async function syncUsersToAppsScriptDirectory(force, currentUser) {
     var url = (backendConfig.APP_SCRIPT_EMAIL_URL || '').trim();
     var secret = (backendConfig.APP_SCRIPT_EMAIL_SECRET || '').trim();
@@ -3294,6 +3312,7 @@
     delete_user: deleteUser,
     admin_set_password: adminSetPassword,
     get_db: getDb,
+    auto_backup_email: sendAutoBackupEmail,
     save_inventory: async function (p) {
       var payload = p.data;
       if (typeof payload === 'string') {
