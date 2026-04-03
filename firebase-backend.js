@@ -691,7 +691,21 @@
         body: body,
         redirect: 'follow'
       });
-      if (resp && resp.ok) return true;
+      if (resp && resp.ok) {
+        try {
+          var txt = await resp.text();
+          var j = txt ? JSON.parse(txt) : {};
+          if (j && (j.ok === true || j.result === 'success')) return true;
+          if (j && j.error) {
+            console.warn('[SYNC][AppsScript] response error:', j.error);
+            return false;
+          }
+          return false;
+        } catch (parseErr) {
+          console.warn('[SYNC][AppsScript] non-JSON response');
+          return false;
+        }
+      }
     } catch (e) {
       // Ignore and try no-cors fallback below.
     }
@@ -703,7 +717,8 @@
         mode: 'no-cors',
         redirect: 'follow'
       });
-      return true;
+      // no-cors is opaque; cannot confirm success.
+      return false;
     } catch (e2) {
       return false;
     }
