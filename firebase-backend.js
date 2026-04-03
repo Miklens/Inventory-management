@@ -3298,6 +3298,14 @@
     get_request_details: getRequestDetails,
     get_stage_counts: getStageCounts,
     get_my_requests: getMyRequests,
+    sync_recipients_now: async function (p) {
+      var synced = await syncUsersToAppsScriptDirectory(true, {
+        email: p && p.email ? p.email : '',
+        name: p && p.name ? p.name : '',
+        role: p && p.role ? p.role : ''
+      });
+      return ok({ synced: !!synced });
+    },
     get_pending_approvals: getPendingApprovals,
     get_requisition_reserved_totals: getRequisitionReservedTotals,
     release_expired_reservations: releaseExpiredReservations,
