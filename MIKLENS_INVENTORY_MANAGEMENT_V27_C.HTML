@@ -10692,6 +10692,9 @@
                                     secret: 'MiklensEmailSecret2024XyZ789',
                                     data: backupPayload
                                 });
+                                if (!result || result.result !== 'success') {
+                                    throw new Error((result && result.error) ? result.error : 'Backup email request failed');
+                                }
                             } else {
                                 // For GAS, send as application/x-www-form-urlencoded to avoid CORS preflight (simple request)
                                 const bodyParams = new URLSearchParams();
