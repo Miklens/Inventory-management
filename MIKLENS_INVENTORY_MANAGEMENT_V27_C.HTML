@@ -2097,6 +2097,7 @@
                 }
 
                 function saveState() {
+                    ensureLockedSerialNumbers();
                     // 1. Save locally immediately for redundancy
                     try {
                         localStorage.setItem('inventoryAppState', JSON.stringify(appState));
@@ -2552,6 +2553,8 @@
                                     }
                                 });
 
+                                ensureLockedSerialNumbers();
+
                                 // Save this fresh cloud data to local as well
                                 localStorage.setItem('inventoryAppState', JSON.stringify(appState));
                                 // Requisition reservations (Store issued, awaiting Manager approval) – show as reserved until Manager approves
@@ -2637,6 +2640,8 @@
                                     });
                                 }
                             });
+
+                            ensureLockedSerialNumbers();
 
                             if (!appState.transactions) appState.transactions = [];
                             // Cap transactions in memory to prevent browser freeze (keep last 2500)
@@ -2730,6 +2735,56 @@
                         if (!appState.inventory[category]) return null;
                         // ROBUST LOOKUP: Check strict match first, then loose match (string vs number)
                         return appState.inventory[category].find(item => item.id === id || item.id == id);
+                    }
+
+                    function ensureLockedSerialNumbersForCategory(category) {
+                        const list = appState && appState.inventory ? appState.inventory[category] : null;
+                        if (!Array.isArray(list)) return false;
+
+                        let changed = false;
+                        const seen = new Set();
+                        let maxSerial = 0;
+
+                        list.forEach(item => {
+                            const serial = Number(item && item.serialNo);
+                            if (Number.isInteger(serial) && serial > 0 && !seen.has(serial)) {
+                                seen.add(serial);
+                                if (serial > maxSerial) maxSerial = serial;
+                                if (item.serialNo !== serial) {
+                                    item.serialNo = serial;
+                                    changed = true;
+                                }
+                            } else {
+                                maxSerial += 1;
+                                while (seen.has(maxSerial)) maxSerial += 1;
+                                if (item) item.serialNo = maxSerial;
+                                seen.add(maxSerial);
+                                changed = true;
+                            }
+                        });
+
+                        return changed;
+                    }
+
+                    function ensureLockedSerialNumbers() {
+                        if (!appState || !appState.inventory) return false;
+                        let changed = false;
+                        Object.keys(appState.inventory).forEach(category => {
+                            if (ensureLockedSerialNumbersForCategory(category)) changed = true;
+                        });
+                        return changed;
+                    }
+
+                    function getNextLockedSerialNumber(category) {
+                        ensureLockedSerialNumbersForCategory(category);
+                        const list = appState && appState.inventory ? appState.inventory[category] : null;
+                        if (!Array.isArray(list) || list.length === 0) return 1;
+                        let maxSerial = 0;
+                        list.forEach(item => {
+                            const serial = Number(item && item.serialNo);
+                            if (Number.isInteger(serial) && serial > maxSerial) maxSerial = serial;
+                        });
+                        return maxSerial + 1;
                     }
 
                     function parseFlexibleDate(dateString) {
@@ -5540,6 +5595,7 @@
                         const showBelowMin = belowMinCheckbox ? belowMinCheckbox.checked : false;
 
                         let items = appState.inventory[category] || [];
+                        ensureLockedSerialNumbersForCategory(category);
                         let itemCalculations = [];
 
                         try {
@@ -5606,7 +5662,7 @@
                             return `
                 <tr id="row-${category}-${item.id}" data-item-id="${item.id}" ${draggingAttrs} class="hover:bg-gray-50 text-center text-sm ${isReorderMode ? 'bg-purple-50' : ''}">
 
-                    <td class="p-2 border-b text-gray-500">${appState.inventory[category].findIndex(i => i.id === item.id) + 1}</td>
+                    <td class="p-2 border-b text-gray-500">${item.serialNo || ''}</td>
                     <td class="p-2 border-b text-left">${item.name}</td>
                     <td class="p-2 border-b">${item.unit}</td>
                     <td class="p-2 border-b">${item.price.toFixed(2)}</td>
@@ -6273,8 +6329,8 @@
                                 const byType = data.byType || {};
                                 const byItem = data.byItem || {};
                                 window._lastPeriodReportData = { dateRange: data.dateRange, byType, byItem, rowCount: data.rowCount, totalQty: data.totalQty };
-                                const typeRows = Object.keys(byType).sort().map(t => `<tr><td class="p-2 border-b">${t}</td><td class="p-2 border-b text-right font-mono">${Number(byType[t]).toFixed(3)}</td></tr>`).join('');
-                                const itemRows = Object.keys(byItem).sort().slice(0, 100).map(i => `<tr><td class="p-2 border-b">${i}</td><td class="p-2 border-b text-right font-mono">${Number(byItem[i]).toFixed(3)}</td></tr>`).join('');
+                                const typeRows = Object.keys(byType).sort().map((t, idx) => `<tr><td class="p-2 border-b">${idx + 1}</td><td class="p-2 border-b">${t}</td><td class="p-2 border-b text-right font-mono">${Number(byType[t]).toFixed(3)}</td></tr>`).join('');
+                                const itemRows = Object.keys(byItem).sort().slice(0, 100).map((i, idx) => `<tr><td class="p-2 border-b">${idx + 1}</td><td class="p-2 border-b">${i}</td><td class="p-2 border-b text-right font-mono">${Number(byItem[i]).toFixed(3)}</td></tr>`).join('');
                                 const more = Object.keys(byItem).length > 100 ? '<p class="text-sm text-gray-500 mt-2">(Top 100 items by quantity. Total items: ' + Object.keys(byItem).length + ')</p>' : '';
                                 resultEl.innerHTML = `
                                     <div class="bg-white rounded-lg border p-4">
@@ -6284,9 +6340,9 @@
                                         </div>
                                         <p class="text-sm">Transactions: <strong>${data.rowCount}</strong> &nbsp;|&nbsp; Total quantity: <strong>${Number(data.totalQty).toFixed(3)}</strong></p>
                                         <h5 class="font-semibold mt-4 mb-2">By type</h5>
-                                        <table class="min-w-full border mb-6"><thead><tr><th class="p-2 border-b text-left">Type</th><th class="p-2 border-b text-right">Qty</th></tr></thead><tbody>${typeRows}</tbody></table>
+                                        <table class="min-w-full border mb-6"><thead><tr><th class="p-2 border-b text-left">S.No</th><th class="p-2 border-b text-left">Type</th><th class="p-2 border-b text-right">Qty</th></tr></thead><tbody>${typeRows}</tbody></table>
                                         <h5 class="font-semibold mt-4 mb-2">By item (top 100)</h5>
-                                        <div class="overflow-x-auto max-h-80"><table class="min-w-full border"><thead><tr><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-right">Qty</th></tr></thead><tbody>${itemRows}</tbody></table></div>${more}
+                                        <div class="overflow-x-auto max-h-80"><table class="min-w-full border"><thead><tr><th class="p-2 border-b text-left">S.No</th><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-right">Qty</th></tr></thead><tbody>${itemRows}</tbody></table></div>${more}
                                     </div>`;
                             } catch (e) {
                                 document.getElementById('period-report-result').innerHTML = '<p class="text-red-600">Network error: ' + (e.message || 'Failed to fetch') + '</p>';
@@ -6299,10 +6355,10 @@
                         if (!d || !d.dateRange) { if (typeof showToast === 'function') showToast('Generate a report first', 'warning'); return; }
                         let csv = 'Period Report,' + d.dateRange.start + ' to ' + d.dateRange.end + '\n';
                         csv += 'Transactions,' + (d.rowCount || 0) + '\nTotal Qty,' + (d.totalQty != null ? Number(d.totalQty).toFixed(3) : '') + '\n\n';
-                        csv += 'By Type\nType,Qty\n';
-                        Object.keys(d.byType || {}).sort().forEach(t => { csv += '"' + t + '",' + Number(d.byType[t]).toFixed(3) + '\n'; });
-                        csv += '\nBy Item\nItem,Qty\n';
-                        Object.keys(d.byItem || {}).sort().forEach(i => { csv += '"' + String(i).replace(/"/g, '""') + '",' + Number(d.byItem[i]).toFixed(3) + '\n'; });
+                        csv += 'By Type\nS.No,Type,Qty\n';
+                        Object.keys(d.byType || {}).sort().forEach((t, idx) => { csv += (idx + 1) + ',"' + t + '",' + Number(d.byType[t]).toFixed(3) + '\n'; });
+                        csv += '\nBy Item\nS.No,Item,Qty\n';
+                        Object.keys(d.byItem || {}).sort().forEach((i, idx) => { csv += (idx + 1) + ',"' + String(i).replace(/"/g, '""') + '",' + Number(d.byItem[i]).toFixed(3) + '\n'; });
                         downloadFile('period_report_' + d.dateRange.start + '_to_' + d.dateRange.end + '.csv', csv, 'text/csv;charset=utf-8;');
                     }
 
@@ -6327,24 +6383,24 @@
                     <button onclick="exportDailyReportCSV('finishedGoods')" class="px-3 py-1 bg-blue-100 text-blue-800 rounded-lg text-sm">Finished Goods</button>
                     <button onclick="exportDailyReportCSV('all')" class="px-4 py-2 bg-green-800 text-white rounded-lg text-sm">Export All</button>
                 </div>
-                <div class="overflow-x-auto mb-8 max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b text-left">Category</th><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-right">Opening</th><th class="p-2 border-b text-right">Received</th><th class="p-2 border-b text-right">Consumed</th><th class="p-2 border-b text-right">Closing</th><th class="p-2 border-b text-right">Closing Value</th></tr></thead><tbody>
-                    ${allItems.map(item => {
+                <div class="overflow-x-auto mb-8 max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b text-left">S.No</th><th class="p-2 border-b text-left">Category</th><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-right">Opening</th><th class="p-2 border-b text-right">Received</th><th class="p-2 border-b text-right">Consumed</th><th class="p-2 border-b text-right">Closing</th><th class="p-2 border-b text-right">Closing Value</th></tr></thead><tbody>
+                    ${allItems.map((item, index) => {
                                 const { openingStock, received, consumed, closingStock } = calculateStock(item, item.category, reportDate);
                                 const cost = item.currentAverageCost || item.price;
                                 const closingValue = closingStock * cost;
-                                return `<tr><td class="p-2 border-b">${item.category.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</td><td class="p-2 border-b">${item.name}</td><td class="p-2 border-b text-right font-bold">${openingStock.toFixed(3)}</td><td class="p-2 border-b text-right ${received > 0 ? 'font-bold' : ''}">${received.toFixed(3)}</td><td class="p-2 border-b text-right ${consumed > 0 ? 'font-bold' : ''}">${consumed.toFixed(3)}</td><td class="p-2 border-b text-right font-semibold">${closingStock.toFixed(3)}</td><td class="p-2 border-b text-right text-blue-800 font-bold">₹${closingValue.toFixed(2)}</td></tr>`;
+                                return `<tr><td class="p-2 border-b">${index + 1}</td><td class="p-2 border-b">${item.category.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</td><td class="p-2 border-b">${item.name}</td><td class="p-2 border-b text-right font-bold">${openingStock.toFixed(3)}</td><td class="p-2 border-b text-right ${received > 0 ? 'font-bold' : ''}">${received.toFixed(3)}</td><td class="p-2 border-b text-right ${consumed > 0 ? 'font-bold' : ''}">${consumed.toFixed(3)}</td><td class="p-2 border-b text-right font-semibold">${closingStock.toFixed(3)}</td><td class="p-2 border-b text-right text-blue-800 font-bold">₹${closingValue.toFixed(2)}</td></tr>`;
                             }).join('')}
                 </tbody></table></div>
                 <h4 class="text-xl font-bold mb-4">Daily Transactions</h4>
-                <div class="overflow-x-auto max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-left">Type</th><th class="p-2 border-b text-right">Quantity</th><th class="p-2 border-b">Actions</th></tr></thead><tbody>
-                    ${transactionsOnDate.length === 0 ? `<tr><td colspan="4" class="text-center py-4">No transactions.</td></tr>` : transactionsOnDate.map(tx => {
+                <div class="overflow-x-auto max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b text-left">S.No</th><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-left">Type</th><th class="p-2 border-b text-right">Quantity</th><th class="p-2 border-b">Actions</th></tr></thead><tbody>
+                    ${transactionsOnDate.length === 0 ? `<tr><td colspan="5" class="text-center py-4">No transactions.</td></tr>` : transactionsOnDate.map((tx, index) => {
                                 const item = findItem(tx.category, tx.itemId);
                                 let typeDisplay = tx.type;
                                 if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') { typeDisplay = 'Stock-Take Adj.'; if (tx.adjustmentReason) typeDisplay += ' (' + tx.adjustmentReason + ')'; }
                                 else if (tx.type === 'production-add') typeDisplay = 'Production (Add)';
                                 else if (tx.type === 'production-consume') typeDisplay = 'Production (Consume)';
                                 else if (tx.type === 'requisition-issue') typeDisplay = 'Requisition Issue';
-                                return `<tr class="hover:bg-gray-50"><td class="p-2 border-b">${item ? item.name : 'Unknown'}</td><td class="p-2 border-b"><span class="px-2 inline-flex text-xs font-semibold rounded-full ${tx.type.includes('receive') || tx.type.includes('add') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${typeDisplay.toUpperCase()}</span></td><td class="p-2 border-b text-right">${(tx.quantity > 0 ? tx.quantity : -tx.quantity).toFixed(3)}</td><td class="p-2 border-b text-center"><button onclick="openEditTxModal(${tx.id})" class="text-blue-500 hover:text-blue-700 text-xs">Edit</button></td></tr>`;
+                                return `<tr class="hover:bg-gray-50"><td class="p-2 border-b">${index + 1}</td><td class="p-2 border-b">${item ? item.name : 'Unknown'}</td><td class="p-2 border-b"><span class="px-2 inline-flex text-xs font-semibold rounded-full ${tx.type.includes('receive') || tx.type.includes('add') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${typeDisplay.toUpperCase()}</span></td><td class="p-2 border-b text-right">${(tx.quantity > 0 ? tx.quantity : -tx.quantity).toFixed(3)}</td><td class="p-2 border-b text-center"><button onclick="openEditTxModal(${tx.id})" class="text-blue-500 hover:text-blue-700 text-xs">Edit</button></td></tr>`;
                             }).join('')}
                 </tbody></table></div>`;
                             document.getElementById('daily-report-date-filter').addEventListener('change', (e) => { reportDate = e.target.value; selectedDate = e.target.value; render(); });
@@ -6449,10 +6505,10 @@
                     <button onclick="exportMonthlyDayWiseXLSX('finishedGoods')" class="px-3 py-1 bg-green-100 text-green-800 rounded-lg text-sm">Finished Goods</button>
                     <button onclick="exportMonthlyDayWiseXLSX('all')" class="px-4 py-2 bg-green-800 text-white rounded-lg text-sm">Export All</button>
                 </div>
-                <div class="overflow-x-auto max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b text-left">Category</th><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-right">Opening Stock</th><th class="p-2 border-b text-right">Total Received</th><th class="p-2 border-b text-right">Total Consumed</th><th class="p-2 border-b text-right">Closing Stock</th><th class="p-2 border-b text-right">Closing Value</th></tr></thead><tbody>
-                    ${monthlyData.map(item => {
+                <div class="overflow-x-auto max-h-96"><table class="min-w-full bg-white border"><thead class="bg-gray-200"><tr><th class="p-2 border-b text-left">S.No</th><th class="p-2 border-b text-left">Category</th><th class="p-2 border-b text-left">Item</th><th class="p-2 border-b text-right">Opening Stock</th><th class="p-2 border-b text-right">Total Received</th><th class="p-2 border-b text-right">Total Consumed</th><th class="p-2 border-b text-right">Closing Stock</th><th class="p-2 border-b text-right">Closing Value</th></tr></thead><tbody>
+                    ${monthlyData.map((item, index) => {
                                 const closingValue = item.closingStock * (item.currentAverageCost || item.price);
-                                return `<tr><td class="p-2 border-b">${item.category.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</td><td class="p-2 border-b">${item.name}</td><td class="p-2 border-b text-right font-bold">${item.openingStock.toFixed(3)}</td><td class="p-2 border-b text-right ${item.totalReceived > 0 ? 'font-bold' : ''}">${item.totalReceived.toFixed(3)}</td><td class="p-2 border-b text-right ${item.totalConsumed > 0 ? 'font-bold' : ''}">${item.totalConsumed.toFixed(3)}</td><td class="p-2 border-b text-right font-semibold">${item.closingStock.toFixed(3)}</td><td class="p-2 border-b text-right text-blue-800 font-bold">₹${closingValue.toFixed(2)}</td></tr>`;
+                                return `<tr><td class="p-2 border-b">${index + 1}</td><td class="p-2 border-b">${item.category.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</td><td class="p-2 border-b">${item.name}</td><td class="p-2 border-b text-right font-bold">${item.openingStock.toFixed(3)}</td><td class="p-2 border-b text-right ${item.totalReceived > 0 ? 'font-bold' : ''}">${item.totalReceived.toFixed(3)}</td><td class="p-2 border-b text-right ${item.totalConsumed > 0 ? 'font-bold' : ''}">${item.totalConsumed.toFixed(3)}</td><td class="p-2 border-b text-right font-semibold">${item.closingStock.toFixed(3)}</td><td class="p-2 border-b text-right text-blue-800 font-bold">₹${closingValue.toFixed(2)}</td></tr>`;
                             }).join('')}
                 </tbody></table></div>`;
                             document.getElementById('month-selector').addEventListener('change', (e) => { currentMonth = e.target.value; startDateFilter = ''; endDateFilter = ''; render(); });
@@ -6545,6 +6601,7 @@
                                 <table class="min-w-full bg-white border">
                                     <thead class="bg-gray-200">
                                         <tr>
+                                            <th class="p-2 border-b">S.No</th>
                                             <th class="p-2 border-b">Date</th>
                                             <th class="p-2 border-b">Opening</th>
                                             <th class="p-2 border-b">Received</th>
@@ -6555,7 +6612,7 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${filteredLedgerEntries.map(entry => {
+                                        ${filteredLedgerEntries.map((entry, index) => {
                                             const txDetails = entry.transactions.map(tx => {
                                                 let typeDisplay = tx.type;
                                                 if (tx.type === 'stock-take-adj-in' || tx.type === 'stock-take-adj-out') { typeDisplay = 'Stock-Take Adj.'; if (tx.adjustmentReason) typeDisplay += ' (' + tx.adjustmentReason + ')'; }
@@ -6567,6 +6624,7 @@
                                             }).join(' ');
                                             return `
                                                 <tr class="text-center text-sm">
+                                                    <td class="p-2 border-b">${index + 1}</td>
                                                     <td class="p-2 border-b">${entry.date}</td>
                                                     <td class="p-2 border-b">${entry.opening.toFixed(3)}</td>
                                                     <td class="p-2 border-b ${entry.received > 0 ? 'font-bold' : ''}">${entry.received.toFixed(3)}</td>
@@ -7838,6 +7896,7 @@
                         } else {
                             itemData.id = Date.now() + Math.random();
                             if (!appState.inventory[category]) appState.inventory[category] = [];
+                            itemData.serialNo = getNextLockedSerialNumber(category);
                             appState.inventory[category].push(itemData);
                         }
 
@@ -8245,6 +8304,7 @@
                                 price: 0, // Price needs to be set manually later by the user if desired
                                 openingStock: 0,
                                 openingStockDate: getToday(),
+                                serialNo: getNextLockedSerialNumber('finishedGoods'),
                                 minStockLevel: 0,
                                 notes: []
                             };
@@ -8608,14 +8668,15 @@
                     // --- DATA EXPORT/IMPORT ---
                     function downloadFile(filename, content, mimeType) { const blob = new Blob([content], { type: mimeType }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
                     function exportDailyReportCSV(filterCategory) {
-                        let csvContent = "Category,Item Name,Unit,Opening Stock,Received,Consumed,Closing Stock,Closing Value (INR)\n";
+                        let csvContent = "S.No,Category,Item Name,Unit,Opening Stock,Received,Consumed,Closing Stock,Closing Value (INR)\n";
                         const reportDate = document.getElementById('daily-report-date-filter')?.value || selectedDate;
                         const categoriesToReport = filterCategory === 'all' ? Object.keys(appState.inventory) : [filterCategory];
+                        let serialNo = 1;
                         categoriesToReport.forEach(category => {
                             (appState.inventory[category] || []).forEach(item => {
                                 const { openingStock, received, consumed, closingStock } = calculateStock(item, category, reportDate);
                                 const value = closingStock * (item.currentAverageCost || item.price);
-                                csvContent += [`"${category}"`, `"${item.name.replace(/"/g, '""')}"`, `"${item.unit}"`, openingStock.toFixed(3), received.toFixed(3), consumed.toFixed(3), closingStock.toFixed(3), value.toFixed(2)].join(',') + "\n";
+                                csvContent += [serialNo++, `"${category}"`, `"${item.name.replace(/"/g, '""')}"`, `"${item.unit}"`, openingStock.toFixed(3), received.toFixed(3), consumed.toFixed(3), closingStock.toFixed(3), value.toFixed(2)].join(',') + "\n";
                             });
                         });
                         downloadFile(`daily_summary_${filterCategory}_${reportDate}.csv`, csvContent, 'text/csv;charset=utf-8;');
@@ -8641,8 +8702,9 @@
                         const reportStartDateString = reportStartDate.toISOString().split('T')[0];
                         const reportEndDateString = reportEndDate.toISOString().split('T')[0];
 
-                        let csvContent = "Category,Item Name,Unit,Unit Price,Opening Stock,Total Received,Total Consumed,Closing Stock,Closing Value Rs\n";
+                        let csvContent = "S.No,Category,Item Name,Unit,Unit Price,Opening Stock,Total Received,Total Consumed,Closing Stock,Closing Value Rs\n";
                         const categoriesToReport = filterCategory === 'all' ? Object.keys(appState.inventory) : [filterCategory];
+                        let serialNo = 1;
 
                         categoriesToReport.forEach(category => {
                             (appState.inventory[category] || []).forEach(item => {
@@ -8671,6 +8733,7 @@
                                 const value = closingStock * (item.currentAverageCost || item.price);
 
                                 csvContent += [
+                                    serialNo++,
                                     `"${category}"`,
                                     `"${item.name.replace(/"/g, '""')}"`,
                                     `"${item.unit}"`,
@@ -8705,8 +8768,9 @@
                         }
 
                         const ledger = generateItemLedger(item, category, ledgerEndDate);
-                        let csvContent = "Date,Opening Stock,Received,Consumed,Closing Stock,Closing Value (₹),Transaction Details\n";
+                        let csvContent = "S.No,Date,Opening Stock,Received,Consumed,Closing Stock,Closing Value (₹),Transaction Details\n";
                         let currentOpeningStock = 0;
+                        let serialNo = 1;
 
                         const firstReportDate = getStartOfDay(ledgerStartDate);
                         if (firstReportDate) {
@@ -8746,7 +8810,7 @@
 
                             const value = close * (item.currentAverageCost || item.price);
 
-                            csvContent += [`"${dateStr}"`, open.toFixed(3), rec.toFixed(3), cons.toFixed(3), close.toFixed(3), value.toFixed(2), `"${txDetails}"`].join(',') + "\n";
+                            csvContent += [serialNo++, `"${dateStr}"`, open.toFixed(3), rec.toFixed(3), cons.toFixed(3), close.toFixed(3), value.toFixed(2), `"${txDetails}"`].join(',') + "\n";
                         }
                         downloadFile(`item_ledger_${item.name.replace(/ /g, '_')}_${ledgerStartDate}_to_${ledgerEndDate}.csv`, csvContent, 'text/csv;charset=utf-8;');
                     }
@@ -8789,7 +8853,8 @@
 
                         for (let d = new Date(reportStartDate); d <= reportEndDate; d.setUTCDate(d.getUTCDate() + 1)) {
                             const currentDateStr = d.toISOString().split('T')[0];
-                            const dailyData = [["Category", "Item Name", "Unit", "Opening Stock", "Received", "Consumed", "Closing Stock"]];
+                            const dailyData = [["S.No", "Category", "Item Name", "Unit", "Opening Stock", "Received", "Consumed", "Closing Stock"]];
+                            let serialNo = 1;
 
                             for (const key in allLedgers) {
                                 const { item, category, ledger } = allLedgers[key];
@@ -8801,6 +8866,7 @@
                                 const dayData = ledger.get(currentDateStr);
                                 if (dayData) {
                                     dailyData.push([
+                                        serialNo++,
                                         category,
                                         item.name,
                                         item.unit,
@@ -10597,7 +10663,8 @@
                                     unit,
                                     price,
                                     openingStock: stock,
-                                    openingStockDate: getToday()
+                                    openingStockDate: getToday(),
+                                    serialNo: getNextLockedSerialNumber(category)
                                 };
                                 appState.inventory[category].push(newItem);
                             }
@@ -12505,6 +12572,7 @@
                                 unit: formula.outputUnit || 'Units',
                                 price: 0, // Should be calculated but 0 for now
                                 quantity: 0, // Base stock
+                                serialNo: getNextLockedSerialNumber('finishedGoods'),
                                 category: 'Finished Goods',
                                 minStock: 0,
                                 location: 'Warehouse',
@@ -16010,7 +16078,7 @@
                             if (!fgItemId && batch.formulaName) {
                                 console.log("ANTIGRAVITY: Creating NEW Finished Good Item.");
                                 const newId = Date.now() + 999;
-                                const fg = { id: newId, name: batch.formulaName, type: 'finishedGoods', unit: batch.unit || 'Unit', currentAverageCost: 0, minStock: 0, description: 'Auto-created' };
+                                const fg = { id: newId, name: batch.formulaName, type: 'finishedGoods', unit: batch.unit || 'Unit', currentAverageCost: 0, minStock: 0, description: 'Auto-created', serialNo: getNextLockedSerialNumber('finishedGoods') };
                                 if (!appState.inventory.finishedGoods) appState.inventory.finishedGoods = [];
                                 appState.inventory.finishedGoods.push(fg);
 
@@ -16694,6 +16762,7 @@
                         const showBelowMin = belowMinCheckbox ? belowMinCheckbox.checked : false;
 
                         let items = appState.inventory[category] || [];
+                        ensureLockedSerialNumbersForCategory(category);
                         let itemCalculations = [];
 
                         try {
@@ -23079,7 +23148,7 @@
                             return `
         <tr id="row-${category}-${item.id}" data-item-id="${item.id}" ${draggingAttrs} class="hover:bg-gray-50 text-center text-sm ${window.isReorderMode ? 'bg-purple-50' : ''}">
 
-            <td class="p-2 border-b text-gray-500">${appState.inventory[category].findIndex(i => i.id === item.id) + 1}</td>
+            <td class="p-2 border-b text-gray-500">${item.serialNo || ''}</td>
             <td class="p-2 border-b text-left">${item.name}</td>
             <td class="p-2 border-b">${item.unit}</td>
             <td class="p-2 border-b">${(parseFloat(item.price) || 0).toFixed(2)}</td>
@@ -25329,6 +25398,7 @@
                                 openingStock: 0,
                                 openingStockDate: getToday(), // CRITICAL for calculateStock
                                 price: 0,
+                                serialNo: getNextLockedSerialNumber('finishedGoods'),
                                 minStockLevel: 0,
                                 location: 'Default'
                             };
