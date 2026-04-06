@@ -908,6 +908,35 @@
     return { status: 'success', result: 'success', version: id };
   }
 
+  async function saveUniversalPackDefaultsOnly(universalPackDetails, baseVersionParam) {
+    var details = (universalPackDetails && typeof universalPackDetails === 'object') ? universalPackDetails : {};
+    var baseVersion = (baseVersionParam !== undefined && baseVersionParam !== null && baseVersionParam !== '') ? String(baseVersionParam) : null;
+
+    var latestRef = db.collection('Database').doc('latest');
+    var currentSnap = await latestRef.get();
+
+    if (baseVersion !== null && baseVersion !== '' && currentSnap.exists) {
+      var currentId = (currentSnap.data().latestId || '').toString();
+      if (currentId !== '' && currentId !== baseVersion) {
+        return { result: 'error', error: 'Data was changed by someone else. Refresh to get the latest, then try again.', code: 'CONFLICT', serverVersion: currentId };
+      }
+    }
+
+    var currentData = currentSnap.exists ? (currentSnap.data() || {}) : {};
+    var payload = (currentData && currentData.data) ? currentData.data : currentData;
+    if (!payload || typeof payload !== 'object') payload = {};
+    payload.universalPackDetails = sanitizeForFirestore(details);
+
+    var id = Date.now().toString();
+    await latestRef.set({
+      data: payload,
+      latestId: id,
+      exportedAt: new Date().toISOString()
+    }, { merge: true });
+
+    return { status: 'success', result: 'success', version: id };
+  }
+
   async function getCollectionArray(collName) {
     var snap = await db.collection(collName).get();
     var out = [];
@@ -953,6 +982,67 @@
     if (Array.isArray(v)) return v;
     if (typeof v === 'object') return v;
     try { return JSON.parse(String(v)); } catch (e) { return def; }
+  }
+
+  function toFiniteNumber(v) {
+    var n = parseFloat(v);
+    return (typeof n === 'number' && n === n && n !== Infinity && n !== -Infinity) ? n : 0;
+  }
+
+  function findInventoryItemByAny(arr, itemId, itemName) {
+    if (!Array.isArray(arr)) return null;
+    var idStr = (itemId != null ? String(itemId) : '').trim();
+    var nameStr = (itemName || '').toString().trim().toLowerCase();
+    for (var i = 0; i < arr.length; i++) {
+      var it = arr[i] || {};
+      var itId = String(it.id != null ? it.id : (it.itemId != null ? it.itemId : '')).trim();
+      var itName = String(it.name || it.itemName || '').trim().toLowerCase();
+      if (idStr && itId && itId === idStr) return it;
+      if (nameStr && itName && itName === nameStr) return it;
+    }
+    return null;
+  }
+
+  function getInventoryQty(item) {
+    if (!item || typeof item !== 'object') return 0;
+    return toFiniteNumber(item.quantity != null ? item.quantity : (item.qty != null ? item.qty : (item.openingStock != null ? item.openingStock : (item.stock != null ? item.stock : 0))));
+  }
+
+  function deriveFormulaIngredientsFromPayload(payload, params) {
+    var formulas = (payload && Array.isArray(payload.formulas)) ? payload.formulas : [];
+    if (!formulas.length) return [];
+
+    var formulaId = params && params.formulaId != null ? String(params.formulaId) : '';
+    var productName = params && params.productName != null ? String(params.productName) : '';
+    var formula = null;
+    if (formulaId) {
+      formula = formulas.find(function (f) { return String((f && f.id) != null ? f.id : '') === formulaId; }) || null;
+    }
+    if (!formula && productName) {
+      formula = formulas.find(function (f) { return String((f && f.name) || '') === productName; }) || null;
+    }
+    if (!formula || !Array.isArray(formula.ingredients) || !formula.ingredients.length) return [];
+
+    var requestedQty = toFiniteNumber(params && (params.requestedQty != null ? params.requestedQty : params.quantity));
+    var outputQty = toFiniteNumber(formula.outputQty);
+    var factor = (requestedQty > 0 && outputQty > 0) ? (requestedQty / outputQty) : 1;
+
+    var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    var rawList = (inv && Array.isArray(inv.rawMaterials)) ? inv.rawMaterials : [];
+
+    return formula.ingredients.map(function (ing) {
+      var itemId = ing && (ing.itemId != null ? ing.itemId : ing.id);
+      var baseQty = toFiniteNumber(ing && (ing.quantity != null ? ing.quantity : ing.qty));
+      var item = findInventoryItemByAny(rawList, itemId, ing && (ing.name || ing.itemName));
+      return {
+        itemId: itemId,
+        id: itemId,
+        category: 'rawMaterials',
+        name: item ? (item.name || item.itemName || String(itemId || '')) : (ing && (ing.name || ing.itemName || String(itemId || ''))),
+        quantity: Math.round((baseQty * factor) * 1000) / 1000,
+        unit: item ? (item.unit || '') : (ing && (ing.unit || ''))
+      };
+    }).filter(function (x) { return x.itemId != null && toFiniteNumber(x.quantity) > 0; });
   }
 
   function buildReservationItemsFromRequisition(data) {
@@ -1684,6 +1774,71 @@
       thread: threads
     };
 
+    try {
+      var dbSnap2 = await db.collection('Database').doc('latest').get();
+      if (dbSnap2.exists) {
+        var d2 = dbSnap2.data() || {};
+        var payload2 = (d2 && d2.data) ? d2.data : d2;
+        var inv2 = (payload2 && payload2.inventory) ? payload2.inventory : payload2;
+
+        if ((!Array.isArray(request.ingredients) || request.ingredients.length === 0) && String(request.type || '').toLowerCase() !== 'research') {
+          var derived = deriveFormulaIngredientsFromPayload(payload2, {
+            formulaId: r.FormulaID || r.formulaId || '',
+            productName: request.productName,
+            quantity: request.quantity,
+            requestedQty: request.quantity
+          });
+          if (derived.length) request.ingredients = derived;
+        }
+
+        var readStock = function (item, categories) {
+          var itemId = item && (item.itemId != null ? item.itemId : item.id);
+          var itemName = item && (item.name || item.itemName || '');
+          for (var ci = 0; ci < categories.length; ci++) {
+            var cat = categories[ci];
+            var arr = inv2 && Array.isArray(inv2[cat]) ? inv2[cat] : [];
+            var found = findInventoryItemByAny(arr, itemId, itemName);
+            if (found) return getInventoryQty(found);
+          }
+          return null;
+        };
+
+        var enrich = function (list, categories) {
+          var src = Array.isArray(list) ? list : [];
+          return src.map(function (it) {
+            var reqQty = toFiniteNumber(it && (it.quantity != null ? it.quantity : it.qty));
+            var stockQty = readStock(it || {}, categories);
+            var low = (stockQty != null) ? (reqQty > stockQty) : false;
+            return Object.assign({}, it, {
+              currentStock: stockQty,
+              lowStock: low
+            });
+          });
+        };
+
+        request.ingredients = enrich(request.ingredients, ['rawMaterials']);
+        request.packing = enrich(request.packing, ['packingMaterials']);
+        request.labels = enrich(request.labels, ['labels']);
+        request.additionalItems = enrich(request.additionalItems, ['rawMaterials', 'packingMaterials', 'labels', 'finishedGoods', 'products']);
+
+        var lowStockItems = [];
+        [].concat(request.ingredients || [], request.packing || [], request.labels || [], request.additionalItems || []).forEach(function (it) {
+          if (!it || !it.lowStock) return;
+          var name = it.name || it.itemName || it.itemId || 'Item';
+          var rq = toFiniteNumber(it.quantity != null ? it.quantity : it.qty);
+          var uq = it.unit || '';
+          var sq = (it.currentStock != null) ? it.currentStock : 0;
+          lowStockItems.push(String(name) + ' (need ' + rq + ' ' + uq + ', have ' + sq + ' ' + uq + ')');
+        });
+        request.stockSummary = {
+          allSufficient: lowStockItems.length === 0,
+          lowStockItems: lowStockItems
+        };
+      }
+    } catch (e) {
+      // Stock enrichment is best-effort.
+    }
+
     // Build a unified audit history timeline for UI.
     // Format expected by UI: { action, user, timestamp, remarks }
     var history = [];
@@ -1772,6 +1927,8 @@
     var rawMaterials = [];
     var packingMaterials = [];
     var labels = [];
+    var formulas = [];
+    var universalPackDetails = {};
     var managers = [];
 
     var formSnap = await db.collection('FormCache').doc('latest').get();
@@ -1800,12 +1957,15 @@
         }
       });
     }
-    if (products.length === 0 && materials.length === 0) {
-      var dbSnap = await db.collection('Database').doc('latest').get();
-      if (dbSnap.exists) {
-        var d = dbSnap.data();
-        var payload = (d && d.data) ? d.data : d;
-        var inv = (payload && payload.inventory) ? payload.inventory : payload;
+    var dbSnap = await db.collection('Database').doc('latest').get();
+    if (dbSnap.exists) {
+      var d = dbSnap.data();
+      var payload = (d && d.data) ? d.data : d;
+      var inv = (payload && payload.inventory) ? payload.inventory : payload;
+      formulas = Array.isArray(payload && payload.formulas) ? payload.formulas : [];
+      universalPackDetails = (payload && payload.universalPackDetails && typeof payload.universalPackDetails === 'object') ? payload.universalPackDetails : {};
+
+      if (products.length === 0 && materials.length === 0) {
         var built = buildFormDataFromInventory(inv);
         products = built.products;
         materials = built.materials;
@@ -1832,10 +1992,12 @@
     });
     return ok({
       products: products,
+      formulas: formulas,
       materials: materials,
       rawMaterials: rawMaterials,
       packingMaterials: packingMaterials,
       labels: labels,
+      universalPackDetails: universalPackDetails,
       managers: managers,
       employees: employees,
       departments: departments,
@@ -1846,7 +2008,7 @@
   async function getLists() {
     var formData = await getFormData();
     if (formData.result !== 'success') return formData;
-    return ok({ data: { products: formData.products, materials: formData.materials, rawMaterials: formData.rawMaterials, packingMaterials: formData.packingMaterials, labels: formData.labels, employees: formData.employees, departments: formData.departments, approvers: formData.approvers } });
+    return ok({ data: { products: formData.products, formulas: formData.formulas, materials: formData.materials, rawMaterials: formData.rawMaterials, packingMaterials: formData.packingMaterials, labels: formData.labels, universalPackDetails: formData.universalPackDetails, employees: formData.employees, departments: formData.departments, approvers: formData.approvers } });
   }
 
   async function getStageCounts() {
@@ -1903,6 +2065,28 @@
       if (typeof x === 'string') return x;
       try { return JSON.stringify(x); } catch (e) { return ''; }
     };
+
+    var ingredientsInput = params.ingredients || params.formulaItems || params.formulaIngredients;
+    var parsedIncomingIngredients = safeJson(ingredientsInput, []);
+    var resolvedIngredients = Array.isArray(parsedIncomingIngredients) ? parsedIncomingIngredients : [];
+    if (resolvedIngredients.length === 0 && type.toLowerCase() !== 'research') {
+      try {
+        var dbSnap = await db.collection('Database').doc('latest').get();
+        if (dbSnap.exists) {
+          var dbPayloadRoot = dbSnap.data() || {};
+          var dbPayload = (dbPayloadRoot && dbPayloadRoot.data) ? dbPayloadRoot.data : dbPayloadRoot;
+          resolvedIngredients = deriveFormulaIngredientsFromPayload(dbPayload, {
+            formulaId: params.formulaId,
+            productName: params.productName,
+            quantity: requestedQty,
+            requestedQty: requestedQty
+          });
+        }
+      } catch (e) {
+        resolvedIngredients = resolvedIngredients || [];
+      }
+    }
+
     var notes = String(params.notes || params.remarks || '');
     if (params.purpose != null && String(params.purpose).trim() !== '') notes = String(params.purpose).trim() + (notes ? '\n' + notes : '');
     var payload = {
@@ -1913,12 +2097,13 @@
       EmployeeName: name,
       ProductName: String(params.productName || ''),
       RequestedQty: requestedQty,
-      Formulaltems: toStr(params.ingredients || params.formulaItems) || '[]',
-      Additionalltems: toStr(params.packing || params.packingItems) || '[]',
+      FormulaID: params.formulaId != null ? String(params.formulaId) : '',
+      Formulaltems: toStr(resolvedIngredients) || '[]',
+      Additionalltems: toStr(params.packing || params.packingItems || params.packingJson) || '[]',
       ManagerEmail: String(params.managerEmail || '').toLowerCase().trim(),
       CreatedDate: new Date().toISOString(),
       Unit: String(params.unit || ''),
-      Labels: toStr(params.labels) || '[]',
+      Labels: toStr(params.labels || params.labelsJson) || '[]',
       Notes: notes,
       CurrentStage: type.toLowerCase() === 'research' ? 'Pending Store & Manager' : 'Pending Manager Approval',
       AdditionalItems: toStr(params.additionalItems || params.items) || '[]',
@@ -3321,6 +3506,17 @@
       var result = await saveInventory(payload, p.baseVersion);
       if (result && (result.status === 'success' || result.result === 'success')) {
         await auditLog('inventory_sync', p.user || p.userEmail || 'inventory_app', { version: result.version || '' });
+      }
+      return result;
+    },
+    save_universal_pack_defaults: async function (p) {
+      var details = p && p.universalPackDetails;
+      if (typeof details === 'string') {
+        try { details = JSON.parse(details); } catch (e) { return fail(e); }
+      }
+      var result = await saveUniversalPackDefaultsOnly(details, p && p.baseVersion);
+      if (result && (result.status === 'success' || result.result === 'success')) {
+        await auditLog('universal_pack_defaults_sync', p.user || p.userEmail || 'inventory_app', { version: result.version || '' });
       }
       return result;
     },
