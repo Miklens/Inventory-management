@@ -188,6 +188,51 @@ exports.processNotificationQueue = functions.firestore
       ];
       to = (payload.requestedBy || '').trim();
       subject = '[MIKLENS] Formula Request ' + (payload.status || '') + ' – ' + (payload.formulaRequestId || '');
+    } else if (type === 'stock_count_requested') {
+      eventTitle = 'Stock Count Request';
+      title = 'Physical Stock Count – Action Required';
+      color = STATUS_COLORS.WARNING;
+      reqId = payload.sarId || docId;
+      details = [
+        { label: 'SAR ID', value: payload.sarId || '' },
+        { label: 'Item', value: payload.itemName || '' },
+        { label: 'Physical Count Reported', value: (payload.physicalQty != null ? payload.physicalQty : '—') + ' ' + (payload.unit || '') },
+        { label: 'Requested by', value: (payload.requestedBy || '') + ' (' + (payload.requestedByEmail || '') + ')' },
+        { label: 'Related Requisition', value: payload.requisitionId || 'N/A' },
+        { label: 'Action', value: 'Open the Stock Count Requests tab to approve and auto-update inventory.' }
+      ];
+      const managers = await getManagerAdminEmails();
+      to = managers.length ? managers.join(',') : '';
+      subject = '[MIKLENS SAR-' + (payload.sarId || '') + '] Stock Count Request – ' + (payload.itemName || '') + ' needs review';
+    } else if (type === 'stock_count_approved') {
+      eventTitle = 'Stock Count Approved';
+      title = 'Inventory Updated – ' + (payload.itemName || '');
+      color = STATUS_COLORS.SUCCESS;
+      reqId = payload.sarId || docId;
+      details = [
+        { label: 'SAR ID', value: payload.sarId || '' },
+        { label: 'Item', value: payload.itemName || '' },
+        { label: 'New Inventory Qty', value: (payload.physicalQty != null ? payload.physicalQty : '—') + ' ' + (payload.unit || '') },
+        { label: 'Approved by', value: payload.reviewedBy || '' },
+        { label: 'Related Requisition', value: payload.requisitionId || 'N/A' },
+        { label: 'Action', value: 'Inventory has been adjusted. You can now issue materials.' }
+      ];
+      to = (payload.requestedByEmail || '').trim();
+      subject = '[MIKLENS SAR-' + (payload.sarId || '') + '] Stock Approved – ' + (payload.itemName || '') + ' inventory updated';
+    } else if (type === 'stock_count_rejected') {
+      eventTitle = 'Stock Count Rejected';
+      title = 'Stock Count Request Rejected';
+      color = STATUS_COLORS.ALERT;
+      reqId = payload.sarId || docId;
+      details = [
+        { label: 'SAR ID', value: payload.sarId || '' },
+        { label: 'Item', value: payload.itemName || '' },
+        { label: 'Physical Count Reported', value: (payload.physicalQty != null ? payload.physicalQty : '—') + ' ' + (payload.unit || '') },
+        { label: 'Rejected by', value: payload.reviewedBy || '' },
+        { label: 'Action', value: 'Contact the manager for clarification or submit a new count.' }
+      ];
+      to = (payload.requestedByEmail || '').trim();
+      subject = '[MIKLENS SAR-' + (payload.sarId || '') + '] Stock Count Rejected – ' + (payload.itemName || '');
     } else {
       eventTitle = type.replace(/_/g, ' ');
       details = [{ label: 'Type', value: type }, { label: 'Data', value: JSON.stringify(payload) }];
