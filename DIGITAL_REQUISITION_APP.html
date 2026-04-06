@@ -14,16 +14,16 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="firebase-backend.js?v=20260403_04"></script>
+    <script src="firebase-backend.js?v=20260404_01"></script>
     <script>
       // Build stamp (helps verify cache/old deployments)
-    window.__REQ_APP_BUILD__ = '2026-04-03_04';
+    window.__REQ_APP_BUILD__ = '2026-04-04_01';
       console.log('[REQ_APP_BUILD]', window.__REQ_APP_BUILD__);
     </script>
     <script>
     /* Inline fallback when firebase-backend.js is not available (e.g. GitHub Pages) */
     if (typeof window.FirebaseBackend === 'undefined') {
-    (function(g){'use strict';var db=null;function fail(e){return{result:'error',error:(e&&e.message)||String(e)};}function ok(d){return Object.assign({result:'success'},d);}async function sha256(s){var b=new TextEncoder().encode(s),h=await crypto.subtle.digest('SHA-256',b),a=Array.from(new Uint8Array(h));return a.map(function(x){return('0'+(x&0xff).toString(16)).slice(-2);}).join('');}async function loginUser(email,password){if(!email||!password)return fail(new Error('Email and password required'));var e=String(email).toLowerCase().trim(),ref=db.collection('Users').doc(e.replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return{result:'error',error:'Invalid login'};var u=snap.data(),st=(u.PasswordHash||'').trim();if(!st)return{result:'error',error:'Invalid login'};var hashed=await sha256(String(password)+e);if(st!==hashed&&(/^[a-f0-9]{64}$/i.test(st)!==false||st!==String(password).trim()))return{result:'error',error:'Invalid login'};return ok({user:{email:u.Email||e,name:u.Name||'',role:u.Role||'',department:u.Department||''}});}async function getDb(){var snap=await db.collection('Database').doc('latest').get();if(!snap.exists)return{status:'success',result:'success',data:null};var d=snap.data(),p=(d&&d.data)?d.data:d,v=(d&&d.latestId)?d.latestId:null;return{status:'success',result:'success',data:p,version:v};}async function saveInventory(payload){var s=(payload&&payload.data)?JSON.stringify(payload):(typeof payload==='string'?payload:JSON.stringify(payload));try{var parsed=typeof s==='string'?JSON.parse(s):s;}catch(e){return fail(e);}var dataObj=(parsed&&parsed.data&&parsed.data.inventory)?parsed.data:parsed;await db.collection('Database').doc('latest').set({data:dataObj||parsed,latestId:Date.now().toString(),exportedAt:new Date().toISOString()});return{status:'success'};}async function getCollectionArray(name){var snap=await db.collection(name).get(),out=[];snap.forEach(function(d){if(d.id==='_empty'||d.id==='latest')return;out.push(Object.assign({_id:d.id},d.data()));});return out;}function safeJson(v,def){if(v==null||v==='')return def;if(Array.isArray(v))return v;if(typeof v==='object')return v;try{return JSON.parse(String(v));}catch(e){return def;}}function rowToRequest(d,light){var r=(d&&d.data)?d.data:d,id=r.RequestID||r.id||d.id,row={id:id,type:r.Type||r.type||'',status:r.Status||r.status||'',requesterName:r.EmployeeName||r.requesterName||'',requesterEmail:r.EmployeeEm||r.requesterEmail||'',productName:r.ProductName||r.productName||'',quantity:r.RequestedQty!=null?r.RequestedQty:r.quantity,unit:r.Unit||r.unit||'',remarks:r.Notes||r.remarks||'',date:r.CreatedDate||r.date,stage:r.CurrentStage||r.stage,currentStage:r.CurrentStage||r.stage};if(r.PartialIssuedQty!=null)row.partialIssuedQty=r.PartialIssuedQty;if(!light){row.ingredients=safeJson(r.Formulaltems||r.ingredients,[]);row.packing=safeJson(r.Additionalltems||r.packing,[]);row.labels=safeJson(r.Labels||r.labels,[]);row.additionalItems=safeJson(r.AdditionalItems||r.additionalItems,[]);row.corrections=safeJson(r.Corrections||r.corrections,[]);}return row;}async function getRequestsByStage(params){var stage=(params.stage||'').toUpperCase(),limit=parseInt(params.limit,10)||20,page=parseInt(params.page,10)||1,skip=(page-1)*limit,light=params.light==='1'||params.light===true,all=await getCollectionArray('Requisitions_V2');function match(r,st){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||r.stage||'').toUpperCase();if(st==='ALL')return true;if(st==='PENDING_ISSUE'){if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||cur.indexOf('PENDING MANAGER APPROVAL')>=0)return true;if((status==='APPROVED'||status==='APPROVE_REQUEST')&&(cur.indexOf('AWAITING')>=0||cur.indexOf('MATERIAL ISSUE')>=0))return true;if(status==='PARTIALLY_ISSUED')return true;}if(st==='WIP'&&(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur.indexOf('MATERIAL ISSUED')>=0||cur==='PAUSED'))return true;if(st==='DISPATCH'&&(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED'))return true;if(st==='PENDING_RECORD'&&(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0||cur.indexOf('MATERIAL ISSUED')>=0))return true;if(st==='PARTIAL_ISSUE'&&status==='PARTIALLY_ISSUED')return true;return false;}var filtered=stage==='ALL'?all:all.filter(function(r){return match(r,stage);}),total=filtered.length,pageList=filtered.slice(skip,skip+limit),requests=pageList.map(function(d){return rowToRequest(d,light);});return ok({requests:requests,totalMatches:total,page:page});}async function getAllRequests(p){return getRequestsByStage({stage:'ALL',limit:p.limit||500,light:p.light});}async function getRequestDetails(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var r=snap.data(),tSnap=await db.collection('RequestThreads').where('RequestID','==',id).get(),threads=[];tSnap.forEach(function(t){threads.push(t.data());});threads.sort(function(a,b){return(new Date(a.Timestamp||0)).getTime()-(new Date(b.Timestamp||0)).getTime();});var req={id:r.RequestID||id,type:r.Type,status:r.Status,requesterEmail:r.EmployeeEm,requesterName:r.EmployeeName,productName:r.ProductName,quantity:r.RequestedQty,unit:r.Unit,ingredients:safeJson(r.Formulaltems,[]),packing:safeJson(r.Additionalltems,[]),labels:safeJson(r.Labels,[]),additionalItems:safeJson(r.AdditionalItems,[]),corrections:safeJson(r.Corrections,[]),notes:r.Notes,date:r.CreatedDate,currentStage:r.CurrentStage,managerEmail:r.ManagerEmail,batchId:r.BatchID,partialIssuedQty:r.PartialIssuedQty,thread:threads};return ok({request:req});}function buildFormDataFromInventory(inv){if(!inv)return{products:[],materials:[],raw:[],pack:[],labels:[]};var toItem=function(i){return{id:i.id||i.name,name:i.name||i.itemName||String(i.id||''),unit:i.unit||'Units'};};var raw=(inv.rawMaterials||[]).map(toItem);var pack=(inv.packingMaterials||[]).map(toItem);var lbl=(inv.labels||[]).map(toItem);var prods=(inv.finishedGoods||inv.products||[]).map(toItem);var materials=[].concat(raw.map(function(r){return Object.assign({},r,{category:'raw'});})).concat(pack.map(function(p){return Object.assign({},p,{category:'packing'});})).concat(lbl.map(function(l){return Object.assign({},l,{category:'labels'});}));return{products:prods,materials:materials,raw:raw,pack:pack,labels:lbl};}async function getFormData(){var products=[],materials=[],raw=[],pack=[],labels=[],managers=[];var fcSnap=await db.collection('FormCache').doc('latest').get();if(fcSnap.exists){var fc=fcSnap.data();products=fc.products||[];materials=fc.materials||[];raw=fc.rawMaterials||[];pack=fc.packingMaterials||[];labels=fc.labels||[];}if(products.length===0&&materials.length===0){var formCol=await db.collection('FormCache').limit(10).get();formCol.forEach(function(d){if(products.length>0&&materials.length>0)return;if(d.id==='_empty'||d.id==='latest')return;var fc2=d.data();var p=fc2.products||[];var m=fc2.materials||[];if(p.length||m.length){products=p;materials=m;raw=fc2.rawMaterials||[];pack=fc2.packingMaterials||[];labels=fc2.labels||[];}});}if(products.length===0&&materials.length===0){var dbSnap=await db.collection('Database').doc('latest').get();if(dbSnap.exists){var d=dbSnap.data();var payload=(d&&d.data)?d.data:d;var inv=(payload&&payload.inventory)?payload.inventory:payload;var built=buildFormDataFromInventory(inv);products=built.products;materials=built.materials;raw=built.raw;pack=built.pack;labels=built.labels;}}var dataSnap=await db.collection('Data').doc('latest').get(),employees=[],departments=[];if(dataSnap.exists){var dd=dataSnap.data();employees=dd.Employees||dd.employees||[];departments=dd.Departments||dd.departments||[];}var uSnap=await db.collection('Users').get();uSnap.forEach(function(d){var u=d.data();if(!u.Role)return;if(String(u.Role).toLowerCase().indexOf('manager')>=0||String(u.Role).toLowerCase().indexOf('admin')>=0)managers.push({name:u.Name,email:u.Email});});return ok({products:products,materials:materials,rawMaterials:raw,packingMaterials:pack,labels:labels,managers:managers,employees:employees,departments:departments,approvers:managers.map(function(m){return m.name;})});}async function getLists(){var fd=await getFormData();if(fd.result!=='success')return fd;return ok({data:{products:fd.products,materials:fd.materials,rawMaterials:fd.rawMaterials,packingMaterials:fd.packingMaterials,labels:fd.labels,employees:fd.employees,departments:fd.departments,approvers:fd.approvers}});}async function getStageCounts(){var all=await getCollectionArray('Requisitions_V2'),counts={PENDING_ISSUE:0,WIP:0,DISPATCH:0,PENDING_RECORD:0,PENDING_APPROVALS:0,PARTIAL_ISSUE:0,PENDING_DISPATCH_APPROVALS:0,FORMULA_REQUESTS:0};all.forEach(function(r){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||'').toUpperCase();if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))counts.PENDING_APPROVALS++;if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||(status==='APPROVED'&&cur.indexOf('AWAITING')>=0)||status==='PARTIALLY_ISSUED')counts.PENDING_ISSUE++;if(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur==='PAUSED')counts.WIP++;if(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED')counts.DISPATCH++;if(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0)counts.PENDING_RECORD++;if(status==='PARTIALLY_ISSUED')counts.PARTIAL_ISSUE++;});var dSnap=await db.collection('RequisitionDispatches').get();dSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.PENDING_DISPATCH_APPROVALS++;});var fSnap=await db.collection('FormulaRequests').get();fSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.FORMULA_REQUESTS++;});return ok({counts:counts});}async function submitRequest(p){var newId='REQ-'+Date.now(),ref=db.collection('Requisitions_V2').doc(newId),payload={RequestID:newId,Type:p.type||'Production',Status:'SUBMITTED',EmployeeEm:p.requesterEmail||p.employeeEmail||'',EmployeeName:p.requesterName||p.employeeName||'',ProductName:p.productName||'',RequestedQty:p.requestedQty!=null?p.requestedQty:p.quantity,Formulaltems:p.ingredients?JSON.stringify(p.ingredients):'[]',Additionalltems:p.packing?JSON.stringify(p.packing):'[]',ManagerEmail:p.managerEmail||'',CreatedDate:new Date().toISOString(),Unit:p.unit||'',Labels:p.labels?JSON.stringify(p.labels):'[]',Notes:p.notes||p.remarks||'',CurrentStage:'Pending Manager Approval',AdditionalItems:p.additionalItems?JSON.stringify(p.additionalItems):'[]',Corrections:'[]',BatchID:'',PartialIssuedQty:0};await ref.set(payload);return ok({requestId:newId});}async function updateRequestStage(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var up={};if(p.stageAction==='PARTIAL_ISSUE'&&p.partialQty!=null)up.PartialIssuedQty=parseFloat(p.partialQty);if(p.stage)up.CurrentStage=p.stage;if(p.status)up.Status=p.status;if(Object.keys(up).length)await ref.update(up);return ok({});}async function addThreadNote(p){if(!p.id)return fail(new Error('No id'));await db.collection('RequestThreads').add({RequestID:p.id,Timestamp:new Date().toISOString(),Actor:p.role||'User',Action:'NOTE',User:p.user||'',Remarks:p.note||''});return ok({});}async function addMaterialRequest(p){if(!p.id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(p.id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var add=safeJson(snap.data().AdditionalItems,[]);if(!Array.isArray(add))add=[];add.push({category:p.category,itemName:p.itemName,quantity:parseFloat(p.quantity)||0});await ref.update({AdditionalItems:JSON.stringify(add)});return ok({});}async function actionRequest(p,action){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var status=action==='APPROVED'?'APPROVED':action==='REJECTED'?'REJECTED':action==='ON_HOLD'?'ON_HOLD':'ON_HOLD',stage=action==='APPROVED'?'Awaiting Material Issue':action==='REJECTED'?'Rejected':'On Hold';await ref.update({Status:status,CurrentStage:stage});return ok({});}async function getMyRequests(p){var email=(p.email||'').toLowerCase().trim(),all=await getCollectionArray('Requisitions_V2'),mine=all.filter(function(r){return(r.EmployeeEm||r.requesterEmail||'').toLowerCase()===email;});return ok({requests:mine.map(function(d){return rowToRequest(d,p.light==='1'||p.light===true);})});}async function getStockAdj(p){var all=await getCollectionArray('StockAdjustmentRequests'),list=(p.status||'').toLowerCase()?all.filter(function(r){return(r.Status||'').toLowerCase()===p.status;}):all;return ok({requests:list});}async function markStockDone(p){if(!p.requestId)return fail(new Error('No requestId'));await db.collection('StockAdjustmentRequests').doc(String(p.requestId).replace(/\//g,'_')).update({Status:'Done',DoneBy:p.doneBy||'',DoneAt:new Date().toISOString()});return ok({});}async function getDispApprovals(){var all=await getCollectionArray('RequisitionDispatches');return ok({data:all.filter(function(d){return(d.Status||'').toLowerCase()==='pending';})});}async function getDispatchesForReq(p){var snap=await db.collection('RequisitionDispatches').where('RequestID','==',p.requestId).get(),list=[];snap.forEach(function(d){list.push(d.data());});return ok({dispatches:list});}var handlers={test_connection:async function(){return ok({status:'Online'});},test:async function(){return ok({status:'Online'});},login:loginUser,get_db:getDb,save_inventory:async function(p){var pl=p.data;if(typeof pl==='string')try{pl=JSON.parse(pl);}catch(e){return fail(e);}return saveInventory(pl);},get_form_data:getFormData,get_form_products:async function(){var fd=await getFormData();return fd.result==='success'?ok({products:fd.products}):fd;},get_lists:getLists,get_requests_by_stage:getRequestsByStage,get_all_requests:getAllRequests,get_request_details:getRequestDetails,get_stage_counts:getStageCounts,get_my_requests:getMyRequests,get_pending_approvals:function(p){return getRequestsByStage({stage:'PENDING_ISSUE',limit:100});},get_material_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_requisition_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_wip_batches:async function(){return ok({batches:await getCollectionArray('WIP_Batches')});},get_pending_production:async function(){var b=await getCollectionArray('WIP_Batches');return ok({pending:b.filter(function(x){return(x.Status||x.status||'').toLowerCase()!=='completed';})});},get_stock_adjustment_requests:getStockAdj,get_pending_dispatch_approvals:getDispApprovals,get_dispatches_for_request:getDispatchesForReq,submit_request:submitRequest,create_request:submitRequest,update_request_stage:updateRequestStage,update_req_stage:updateRequestStage,add_thread_note:addThreadNote,add_material_request:addMaterialRequest,approve_request:function(p){return actionRequest(p,'APPROVED');},reject_request:function(p){return actionRequest(p,'REJECTED');},hold_request:function(p){return actionRequest(p,'ON_HOLD');},mark_stock_adjustment_done:markStockDone,consume_requisition_material:async function(p){if(!p.reqId||!p.itemName)return fail(new Error('reqId and itemName required'));return ok({message:'Recorded (Firebase)',remaining:0});}};async function callBackend(action,params){if(!db)return fail(new Error('Firebase not initialized'));params=params||{};var h=handlers[action];if(!h)return fail(new Error('Invalid action: '+action));try{return await h(params);}catch(e){return fail(e);}}function init(config){if(typeof g.firebase==='undefined'){console.error('Firebase SDK not loaded');return false;}try{g.firebase.initializeApp(config);db=g.firebase.firestore();return true;}catch(e){console.error('Firebase init failed',e);return false;}}g.FirebaseBackend={init:init,callBackend:callBackend};})(typeof window!=='undefined'?window:this);
+    (function(g){'use strict';var db=null;function fail(e){return{result:'error',error:(e&&e.message)||String(e)};}function ok(d){return Object.assign({result:'success'},d);}async function sha256(s){var b=new TextEncoder().encode(s),h=await crypto.subtle.digest('SHA-256',b),a=Array.from(new Uint8Array(h));return a.map(function(x){return('0'+(x&0xff).toString(16)).slice(-2);}).join('');}async function loginUser(email,password){if(!email||!password)return fail(new Error('Email and password required'));var e=String(email).toLowerCase().trim(),ref=db.collection('Users').doc(e.replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return{result:'error',error:'Invalid login'};var u=snap.data(),st=(u.PasswordHash||'').trim();if(!st)return{result:'error',error:'Invalid login'};var hashed=await sha256(String(password)+e);if(st!==hashed&&(/^[a-f0-9]{64}$/i.test(st)!==false||st!==String(password).trim()))return{result:'error',error:'Invalid login'};return ok({user:{email:u.Email||e,name:u.Name||'',role:u.Role||'',department:u.Department||''}});}async function getDb(){var snap=await db.collection('Database').doc('latest').get();if(!snap.exists)return{status:'success',result:'success',data:null};var d=snap.data(),p=(d&&d.data)?d.data:d,v=(d&&d.latestId)?d.latestId:null;return{status:'success',result:'success',data:p,version:v};}async function saveInventory(payload){var s=(payload&&payload.data)?JSON.stringify(payload):(typeof payload==='string'?payload:JSON.stringify(payload));try{var parsed=typeof s==='string'?JSON.parse(s):s;}catch(e){return fail(e);}var dataObj=(parsed&&parsed.data&&parsed.data.inventory)?parsed.data:parsed;await db.collection('Database').doc('latest').set({data:dataObj||parsed,latestId:Date.now().toString(),exportedAt:new Date().toISOString()});return{status:'success'};}async function getCollectionArray(name){var snap=await db.collection(name).get(),out=[];snap.forEach(function(d){if(d.id==='_empty'||d.id==='latest')return;out.push(Object.assign({_id:d.id},d.data()));});return out;}function safeJson(v,def){if(v==null||v==='')return def;if(Array.isArray(v))return v;if(typeof v==='object')return v;try{return JSON.parse(String(v));}catch(e){return def;}}function rowToRequest(d,light){var r=(d&&d.data)?d.data:d,id=r.RequestID||r.id||d.id,row={id:id,type:r.Type||r.type||'',status:r.Status||r.status||'',requesterName:r.EmployeeName||r.requesterName||'',requesterEmail:r.EmployeeEm||r.requesterEmail||'',productName:r.ProductName||r.productName||'',quantity:r.RequestedQty!=null?r.RequestedQty:r.quantity,unit:r.Unit||r.unit||'',remarks:r.Notes||r.remarks||'',date:r.CreatedDate||r.date,stage:r.CurrentStage||r.stage,currentStage:r.CurrentStage||r.stage};if(r.PartialIssuedQty!=null)row.partialIssuedQty=r.PartialIssuedQty;if(!light){row.ingredients=safeJson(r.Formulaltems||r.ingredients,[]);row.packing=safeJson(r.Additionalltems||r.packing,[]);row.labels=safeJson(r.Labels||r.labels,[]);row.additionalItems=safeJson(r.AdditionalItems||r.additionalItems,[]);row.corrections=safeJson(r.Corrections||r.corrections,[]);}return row;}async function getRequestsByStage(params){var stage=(params.stage||'').toUpperCase(),limit=parseInt(params.limit,10)||20,page=parseInt(params.page,10)||1,skip=(page-1)*limit,light=params.light==='1'||params.light===true,all=await getCollectionArray('Requisitions_V2');function match(r,st){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||r.stage||'').toUpperCase();if(st==='ALL')return true;if(st==='PENDING_ISSUE'){if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||cur.indexOf('PENDING MANAGER APPROVAL')>=0)return true;if((status==='APPROVED'||status==='APPROVE_REQUEST')&&(cur.indexOf('AWAITING')>=0||cur.indexOf('MATERIAL ISSUE')>=0))return true;if(status==='PARTIALLY_ISSUED')return true;}if(st==='WIP'&&(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur.indexOf('MATERIAL ISSUED')>=0||cur==='PAUSED'))return true;if(st==='DISPATCH'&&(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED'))return true;if(st==='PENDING_RECORD'&&(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0||cur.indexOf('MATERIAL ISSUED')>=0))return true;if(st==='PARTIAL_ISSUE'&&status==='PARTIALLY_ISSUED')return true;if(st==='PENDING_APPROVALS'){if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))return true;if(status==='ISSUED_PENDING_APPROVAL')return true;return false;}return false;}var filtered=stage==='ALL'?all:all.filter(function(r){return match(r,stage);}),total=filtered.length,pageList=filtered.slice(skip,skip+limit),requests=pageList.map(function(d){return rowToRequest(d,light);});return ok({requests:requests,totalMatches:total,page:page});}async function getAllRequests(p){return getRequestsByStage({stage:'ALL',limit:p.limit||500,light:p.light});}async function getRequestDetails(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var r=snap.data(),tSnap=await db.collection('RequestThreads').where('RequestID','==',id).get(),threads=[];tSnap.forEach(function(t){threads.push(t.data());});threads.sort(function(a,b){return(new Date(a.Timestamp||0)).getTime()-(new Date(b.Timestamp||0)).getTime();});var req={id:r.RequestID||id,type:r.Type,status:r.Status,requesterEmail:r.EmployeeEm,requesterName:r.EmployeeName,productName:r.ProductName,quantity:r.RequestedQty,unit:r.Unit,ingredients:safeJson(r.Formulaltems,[]),packing:safeJson(r.Additionalltems,[]),labels:safeJson(r.Labels,[]),additionalItems:safeJson(r.AdditionalItems,[]),corrections:safeJson(r.Corrections,[]),notes:r.Notes,date:r.CreatedDate,currentStage:r.CurrentStage,managerEmail:r.ManagerEmail,batchId:r.BatchID,partialIssuedQty:r.PartialIssuedQty,thread:threads};return ok({request:req});}function buildFormDataFromInventory(inv){if(!inv)return{products:[],materials:[],raw:[],pack:[],labels:[]};var toItem=function(i){return{id:i.id||i.name,name:i.name||i.itemName||String(i.id||''),unit:i.unit||'Units'};};var raw=(inv.rawMaterials||[]).map(toItem);var pack=(inv.packingMaterials||[]).map(toItem);var lbl=(inv.labels||[]).map(toItem);var prods=(inv.finishedGoods||inv.products||[]).map(toItem);var materials=[].concat(raw.map(function(r){return Object.assign({},r,{category:'raw'});})).concat(pack.map(function(p){return Object.assign({},p,{category:'packing'});})).concat(lbl.map(function(l){return Object.assign({},l,{category:'labels'});}));return{products:prods,materials:materials,raw:raw,pack:pack,labels:lbl};}async function getFormData(){var products=[],materials=[],raw=[],pack=[],labels=[],managers=[];var fcSnap=await db.collection('FormCache').doc('latest').get();if(fcSnap.exists){var fc=fcSnap.data();products=fc.products||[];materials=fc.materials||[];raw=fc.rawMaterials||[];pack=fc.packingMaterials||[];labels=fc.labels||[];}if(products.length===0&&materials.length===0){var formCol=await db.collection('FormCache').limit(10).get();formCol.forEach(function(d){if(products.length>0&&materials.length>0)return;if(d.id==='_empty'||d.id==='latest')return;var fc2=d.data();var p=fc2.products||[];var m=fc2.materials||[];if(p.length||m.length){products=p;materials=m;raw=fc2.rawMaterials||[];pack=fc2.packingMaterials||[];labels=fc2.labels||[];}});}if(products.length===0&&materials.length===0){var dbSnap=await db.collection('Database').doc('latest').get();if(dbSnap.exists){var d=dbSnap.data();var payload=(d&&d.data)?d.data:d;var inv=(payload&&payload.inventory)?payload.inventory:payload;var built=buildFormDataFromInventory(inv);products=built.products;materials=built.materials;raw=built.raw;pack=built.pack;labels=built.labels;}}var dataSnap=await db.collection('Data').doc('latest').get(),employees=[],departments=[];if(dataSnap.exists){var dd=dataSnap.data();employees=dd.Employees||dd.employees||[];departments=dd.Departments||dd.departments||[];}var uSnap=await db.collection('Users').get();uSnap.forEach(function(d){var u=d.data();if(!u.Role)return;if(String(u.Role).toLowerCase().indexOf('manager')>=0||String(u.Role).toLowerCase().indexOf('admin')>=0)managers.push({name:u.Name,email:u.Email});});return ok({products:products,materials:materials,rawMaterials:raw,packingMaterials:pack,labels:labels,managers:managers,employees:employees,departments:departments,approvers:managers.map(function(m){return m.name;})});}async function getLists(){var fd=await getFormData();if(fd.result!=='success')return fd;return ok({data:{products:fd.products,materials:fd.materials,rawMaterials:fd.rawMaterials,packingMaterials:fd.packingMaterials,labels:fd.labels,employees:fd.employees,departments:fd.departments,approvers:fd.approvers}});}async function getStageCounts(){var all=await getCollectionArray('Requisitions_V2'),counts={PENDING_ISSUE:0,WIP:0,DISPATCH:0,PENDING_RECORD:0,PENDING_APPROVALS:0,PARTIAL_ISSUE:0,PENDING_DISPATCH_APPROVALS:0,FORMULA_REQUESTS:0};all.forEach(function(r){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||'').toUpperCase();if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))counts.PENDING_APPROVALS++;if(status==='ISSUED_PENDING_APPROVAL')counts.PENDING_APPROVALS++;if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||(status==='APPROVED'&&cur.indexOf('AWAITING')>=0)||status==='PARTIALLY_ISSUED')counts.PENDING_ISSUE++;if(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur==='PAUSED')counts.WIP++;if(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED')counts.DISPATCH++;if(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0)counts.PENDING_RECORD++;if(status==='PARTIALLY_ISSUED')counts.PARTIAL_ISSUE++;});var dSnap=await db.collection('RequisitionDispatches').get();dSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.PENDING_DISPATCH_APPROVALS++;});var fSnap=await db.collection('FormulaRequests').get();fSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.FORMULA_REQUESTS++;});return ok({counts:counts});}async function submitRequest(p){var newId='REQ-'+Date.now(),ref=db.collection('Requisitions_V2').doc(newId),payload={RequestID:newId,Type:p.type||'Production',Status:'SUBMITTED',EmployeeEm:p.requesterEmail||p.employeeEmail||'',EmployeeName:p.requesterName||p.employeeName||'',ProductName:p.productName||'',RequestedQty:p.requestedQty!=null?p.requestedQty:p.quantity,Formulaltems:p.ingredients?JSON.stringify(p.ingredients):'[]',Additionalltems:p.packing?JSON.stringify(p.packing):'[]',ManagerEmail:p.managerEmail||'',CreatedDate:new Date().toISOString(),Unit:p.unit||'',Labels:p.labels?JSON.stringify(p.labels):'[]',Notes:p.notes||p.remarks||'',CurrentStage:'Pending Manager Approval',AdditionalItems:p.additionalItems?JSON.stringify(p.additionalItems):'[]',Corrections:'[]',BatchID:'',PartialIssuedQty:0};await ref.set(payload);return ok({requestId:newId});}async function updateRequestStage(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var up={};if(p.stageAction==='PARTIAL_ISSUE'&&p.partialQty!=null)up.PartialIssuedQty=parseFloat(p.partialQty);if(p.stage)up.CurrentStage=p.stage;if(p.status)up.Status=p.status;if(Object.keys(up).length)await ref.update(up);return ok({});}async function addThreadNote(p){if(!p.id)return fail(new Error('No id'));await db.collection('RequestThreads').add({RequestID:p.id,Timestamp:new Date().toISOString(),Actor:p.role||'User',Action:'NOTE',User:p.user||'',Remarks:p.note||''});return ok({});}async function addMaterialRequest(p){if(!p.id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(p.id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var add=safeJson(snap.data().AdditionalItems,[]);if(!Array.isArray(add))add=[];add.push({category:p.category,itemName:p.itemName,quantity:parseFloat(p.quantity)||0});await ref.update({AdditionalItems:JSON.stringify(add)});return ok({});}async function actionRequest(p,action){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var status=action==='APPROVED'?'APPROVED':action==='REJECTED'?'REJECTED':action==='ON_HOLD'?'ON_HOLD':'ON_HOLD',stage=action==='APPROVED'?'Awaiting Material Issue':action==='REJECTED'?'Rejected':'On Hold';await ref.update({Status:status,CurrentStage:stage});return ok({});}async function getMyRequests(p){var email=(p.email||'').toLowerCase().trim(),all=await getCollectionArray('Requisitions_V2'),mine=all.filter(function(r){return(r.EmployeeEm||r.requesterEmail||'').toLowerCase()===email;});return ok({requests:mine.map(function(d){return rowToRequest(d,p.light==='1'||p.light===true);})});}async function getStockAdj(p){var all=await getCollectionArray('StockAdjustmentRequests'),list=(p.status||'').toLowerCase()?all.filter(function(r){return(r.Status||'').toLowerCase()===p.status;}):all;return ok({requests:list});}async function markStockDone(p){if(!p.requestId)return fail(new Error('No requestId'));await db.collection('StockAdjustmentRequests').doc(String(p.requestId).replace(/\//g,'_')).update({Status:'Done',DoneBy:p.doneBy||'',DoneAt:new Date().toISOString()});return ok({});}async function getDispApprovals(){var all=await getCollectionArray('RequisitionDispatches');return ok({data:all.filter(function(d){return(d.Status||'').toLowerCase()==='pending';})});}async function getDispatchesForReq(p){var snap=await db.collection('RequisitionDispatches').where('RequestID','==',p.requestId).get(),list=[];snap.forEach(function(d){list.push(d.data());});return ok({dispatches:list});}var handlers={test_connection:async function(){return ok({status:'Online'});},test:async function(){return ok({status:'Online'});},login:loginUser,get_db:getDb,save_inventory:async function(p){var pl=p.data;if(typeof pl==='string')try{pl=JSON.parse(pl);}catch(e){return fail(e);}return saveInventory(pl);},get_form_data:getFormData,get_form_products:async function(){var fd=await getFormData();return fd.result==='success'?ok({products:fd.products}):fd;},get_lists:getLists,get_requests_by_stage:getRequestsByStage,get_all_requests:getAllRequests,get_request_details:getRequestDetails,get_stage_counts:getStageCounts,get_my_requests:getMyRequests,get_pending_approvals:function(p){return getRequestsByStage({stage:'PENDING_APPROVALS',limit:100});},get_material_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_requisition_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_wip_batches:async function(){return ok({batches:await getCollectionArray('WIP_Batches')});},get_pending_production:async function(){var b=await getCollectionArray('WIP_Batches');return ok({pending:b.filter(function(x){return(x.Status||x.status||'').toLowerCase()!=='completed';})});},get_stock_adjustment_requests:getStockAdj,get_pending_dispatch_approvals:getDispApprovals,get_dispatches_for_request:getDispatchesForReq,submit_request:submitRequest,create_request:submitRequest,update_request_stage:updateRequestStage,update_req_stage:updateRequestStage,add_thread_note:addThreadNote,add_material_request:addMaterialRequest,approve_request:function(p){return actionRequest(p,'APPROVED');},reject_request:function(p){return actionRequest(p,'REJECTED');},hold_request:function(p){return actionRequest(p,'ON_HOLD');},approve_partial_request:function(p){return actionRequest(p,'APPROVED');},hold_plan_request:function(p){return actionRequest(p,'ON_HOLD');},mark_stock_adjustment_done:markStockDone,consume_requisition_material:async function(p){if(!p.reqId||!p.itemName)return fail(new Error('reqId and itemName required'));return ok({message:'Recorded (Firebase)',remaining:0});}};async function callBackend(action,params){if(!db)return fail(new Error('Firebase not initialized'));params=params||{};var h=handlers[action];if(!h)return fail(new Error('Invalid action: '+action));try{return await h(params);}catch(e){return fail(e);}}function init(config){if(typeof g.firebase==='undefined'){console.error('Firebase SDK not loaded');return false;}try{g.firebase.initializeApp(config);db=g.firebase.firestore();return true;}catch(e){console.error('Firebase init failed',e);return false;}}g.FirebaseBackend={init:init,callBackend:callBackend};})(typeof window!=='undefined'?window:this);
     }
     </script>
     <style>
@@ -171,7 +171,7 @@
         <!-- Navigation Tabs -->
         <nav class="bg-white border-b">
             <div class="max-w-7xl mx-auto px-4">
-                <div class="flex gap-4" id="navTabs">
+                <div class="flex gap-4 overflow-x-auto pb-px" id="navTabs">
                     <!-- Dynamically populated based on role -->
                 </div>
             </div>
@@ -690,7 +690,7 @@
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(payload),
                         redirect: 'follow'
-                    });
+                    }); 
                     if (resp && resp.ok) {
                         try {
                             const txt = await resp.text();
@@ -755,6 +755,14 @@
         }
         document.addEventListener('mousedown', updateRequisitionSessionActivity);
         document.addEventListener('keydown', updateRequisitionSessionActivity);
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                var modal = document.getElementById('detailsModal');
+                if (modal && !modal.classList.contains('portal-hidden') && modal.style.display !== 'none') {
+                    closeDetails();
+                }
+            }
+        });
         setInterval(function () {
             if (!currentUser) return;
             // In Firebase mode, rely on Firebase Auth persistence instead of aggressive local timeouts.
@@ -1040,7 +1048,7 @@
                     'partial-issue': c.PARTIAL_ISSUE || 0,
                     'wip-management': c.WIP || 0,
                     'dispatch-queue': c.DISPATCH || 0,
-                    'request-dispatch': (c.DISPATCH || 0) + (c.PENDING_ISSUE || 0),
+                    'request-dispatch': c.DISPATCH || 0,
                     'request-dispatch-direct': c.PENDING_ISSUE || 0,
                     'pending-record': c.PENDING_RECORD || 0,
                     'pending-approvals': c.PENDING_APPROVALS || 0,
@@ -1080,7 +1088,7 @@
         // ==========================================
         // IN-MEMORY VIEW CACHE (session only, no localStorage)
         // ==========================================
-        const VIEW_CACHE_TTL_MS = 6000;
+        const VIEW_CACHE_TTL_MS = 30000;
         let viewCache = {};
         function invalidateViewCache(viewIdOrAll) {
             if (viewIdOrAll === true) { viewCache = {}; detailCache = {}; }
@@ -1139,6 +1147,7 @@
         function loadView(viewId, role, clickEvent) {
             const contentArea = document.getElementById('contentArea');
             if (!contentArea) return;
+            currentViewId = viewId;
 
             // Update active tab only if there's a click event
             if (clickEvent && clickEvent.target) {
@@ -1262,7 +1271,7 @@
                                 <span class="text-3xl font-black text-amber-600">${pendingApprovals}</span>
                             </div>
                             <h3 class="font-bold text-gray-800">Pending Approvals</h3>
-                            <p class="text-xs text-gray-500 mt-1">Awaiting manager action</p>
+                            <p class="text-xs text-gray-500 mt-1">Submitted &amp; awaiting approval</p>
                             <button onclick="loadView('pending-approvals')" class="mt-4 w-full py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-semibold hover:bg-amber-100">View</button>
                         </div>
                         <div class="bg-white rounded-xl shadow border border-gray-100 p-6 hover:shadow-md transition">
@@ -1271,7 +1280,7 @@
                                 <span class="text-3xl font-black text-blue-600">${pendingIssue}</span>
                             </div>
                             <h3 class="font-bold text-gray-800">Pending Issue</h3>
-                            <p class="text-xs text-gray-500 mt-1">Ready for store to issue</p>
+                            <p class="text-xs text-gray-500 mt-1">Approved &amp; awaiting material issue</p>
                             <button onclick="loadView('pending-issue')" class="mt-4 w-full py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-100">View</button>
                         </div>
                         <div class="bg-white rounded-xl shadow border border-gray-100 p-6 hover:shadow-md transition">
@@ -1350,13 +1359,15 @@
                         const isCorrection = req.status === 'CORRECTION_REQUIRED';
                         const isRejected = ['REJECTED', 'REJECTED_BY_MANAGER', 'REJECT_REQUEST'].includes(req.status);
                         const isStoreIssuedPending = req.status === 'ISSUED_PENDING_APPROVAL';
+                        const isOnHold = req.status === 'ON_HOLD';
 
                         const statusStyle = isApproved ? 'bg-green-100 text-green-700' :
                             isStoreIssuedPending ? 'bg-amber-100 text-amber-700' :
                             isRejected ? 'bg-red-100 text-red-700' :
-                                isCorrection ? 'bg-orange-100 text-orange-700' :
-                                    'bg-yellow-100 text-yellow-700';
-                        const statusText = isApproved ? 'APPROVED' : (isRejected ? 'REJECTED' : (isCorrection ? 'CORRECTION' : (isStoreIssuedPending ? 'Store Issued – Awaiting Approval' : req.status)));
+                            isCorrection ? 'bg-orange-100 text-orange-700' :
+                            isOnHold ? 'bg-orange-100 text-orange-600' :
+                                'bg-yellow-100 text-yellow-700';
+                        const statusText = isApproved ? 'APPROVED' : (isRejected ? 'REJECTED' : (isCorrection ? 'CORRECTION' : (isStoreIssuedPending ? 'Store Issued – Awaiting Approval' : (isOnHold ? 'On Hold' : req.status))));
 
                         const createdAt = formatDateTime(guessCreatedAt(req));
                         return `
@@ -1439,6 +1450,65 @@
             document.querySelectorAll('.wizard-step-2-form-buttons').forEach(function (el) { el.style.display = step === 2 ? 'none' : 'flex'; });
             if (step === 4) window.renderNewRequestReview && window.renderNewRequestReview();
         }
+
+        function getMissingSplitPackDetails(productName) {
+            const missing = [];
+            if (!productName) return missing;
+            const formulaDrivenProducts = cachedFormData && cachedFormData.formulas
+                ? cachedFormData.formulas.filter(f => f && f.name)
+                : [];
+            const formula = formulaDrivenProducts.find(f => String(f.name) === String(productName));
+            const selectedEntries = Object.entries(window.selectedPackSizes || {}).filter(function (pair) {
+                return (parseFloat(pair[1]) || 0) > 0;
+            });
+            selectedEntries.forEach(function (pair) {
+                const packSize = pair[0];
+                const resolved = getResolvedPackMaterials(formula, packSize);
+                if (!resolved || !resolved.materials || !resolved.materials.length) {
+                    missing.push(packSize);
+                }
+            });
+            return missing;
+        }
+
+        function validateSplitPackDetailsBeforeProceed() {
+            const productName = (document.getElementById('productSelect') || {}).value || '';
+            const selectedEntries = Object.entries(window.selectedPackSizes || {}).filter(function (pair) {
+                return (parseFloat(pair[1]) || 0) > 0;
+            });
+            if (!selectedEntries.length) return true;
+
+            const missing = getMissingSplitPackDetails(productName);
+            if (!missing.length) return true;
+
+            showToast('Add batch pack details first for: ' + missing.join(', ') + '.', 'error');
+            const splitWrap = document.getElementById('packSizeCheckboxes');
+            if (splitWrap && typeof splitWrap.scrollIntoView === 'function') {
+                splitWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            const editor = document.getElementById('batchPackOverrideEditor');
+            if (editor) {
+                renderBatchPackOverrideEditor();
+                editor.classList.remove('hidden');
+            }
+            return false;
+        }
+
+        function handleWizardNext() {
+            var s = window.newRequestWizardStep || 1;
+            if (s === 1) {
+                if (window.newRequestWizardType) goToNewRequestWizardStep(2);
+                return;
+            }
+            if (s === 2) {
+                if (!validateSplitPackDetailsBeforeProceed()) return;
+                goToNewRequestWizardStep(3);
+                return;
+            }
+            if (s === 3) {
+                goToNewRequestWizardStep(4);
+            }
+        }
         function renderNewRequestReview() {
             var container = document.getElementById('wizard-review-container');
             if (!container) return;
@@ -1450,6 +1520,10 @@
                 var purpose = (document.getElementById('prodPurpose') && document.getElementById('prodPurpose').value) || '';
                 var target = (document.getElementById('prodTargetDate') && document.getElementById('prodTargetDate').value) || '';
                 var remarks = (document.getElementById('prodRemarks') && document.getElementById('prodRemarks').value) || '';
+                var pkgRaw = (document.getElementById('prodPackageType') && document.getElementById('prodPackageType').value) || '';
+                var pkgCustom = (document.getElementById('prodPackageTypeCustom') && document.getElementById('prodPackageTypeCustom').value) || '';
+                var packageType = pkgRaw === 'custom' ? pkgCustom : pkgRaw;
+                var labelMode = (document.getElementById('prodLabelMode') && document.getElementById('prodLabelMode').value) || 'normal';
                 var packingJson = typeof getProductionPackingLabelsJson === 'function' ? getProductionPackingLabelsJson('prodPackingRows') : [];
                 var labelsJson = typeof getProductionPackingLabelsJson === 'function' ? getProductionPackingLabelsJson('prodLabelsRows') : [];
                 var packingLine = packingJson.length ? packingJson.length + ' packing item(s)' : 'No packing items';
@@ -1459,6 +1533,8 @@
                     '<p><strong>Type:</strong> Production</p>' +
                     '<p><strong>Product:</strong> ' + (product || '—').replace(/</g, '&lt;') + '</p>' +
                     '<p><strong>Quantity:</strong> ' + (qty || '—').replace(/</g, '&lt;') + ' ' + (unit || '').replace(/</g, '&lt;') + '</p>' +
+                    '<p><strong>Package Type:</strong> ' + (packageType || '—').replace(/</g, '&lt;') + '</p>' +
+                    '<p><strong>Label Mode:</strong> ' + (labelMode === 'white' ? 'White Label' : 'Normal Label') + '</p>' +
                     '<p><strong>Purpose / Batch:</strong> ' + (purpose || '—').replace(/</g, '&lt;') + '</p>' +
                     '<p><strong>Target date:</strong> ' + (target || '—').replace(/</g, '&lt;') + '</p>' +
                     (remarks ? '<p><strong>Remarks:</strong> ' + String(remarks).replace(/</g, '&lt;').substring(0, 200) + (remarks.length > 200 ? '...' : '') + '</p>' : '') +
@@ -1483,7 +1559,10 @@
             var type = window.newRequestWizardType || 'production';
             if (type === 'production') {
                 var form = document.getElementById('productionFormForm');
-                if (form) form.requestSubmit();
+                if (!form) return;
+                // Call handler directly (same pattern as research) to avoid double-trigger via form.requestSubmit()
+                var ev = { preventDefault: function() {}, target: form, submitter: null };
+                submitProductionRequest(ev);
             } else {
                 var purposeEl = document.getElementById('resPurpose');
                 var purpose = (purposeEl && purposeEl.value) ? String(purposeEl.value).trim() : '';
@@ -1543,17 +1622,81 @@
                                     <!-- Populated from formulas sheet -->
                                 </select>
                             </div>
-                            
-                            <div>
-                                <label class="block text-sm font-bold text-gray-700 mb-2">Quantity to Produce</label>
-                                <div class="flex gap-4">
-                                    <input type="number" id="prodQuantity" required step="0.01" 
-                                           class="flex-1 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                                           placeholder="1000">
-                                    <input type="text" id="prodUnit" readonly 
-                                           class="w-24 px-4 py-3 border rounded-lg bg-gray-100"
-                                           placeholder="L">
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Single Package Type (Optional)</label>
+                                    <select id="prodPackageType" class="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500" onchange="if(this.value==='custom'){document.getElementById('prodPackageTypeCustomWrap').classList.remove('hidden');document.getElementById('prodPackageTypeCustom').required=true;}else{document.getElementById('prodPackageTypeCustomWrap').classList.add('hidden');document.getElementById('prodPackageTypeCustom').required=false;} if(typeof autoFillPackingMaterials === 'function') autoFillPackingMaterials();">
+                                        <option value="">Select package...</option>
+                                        <option value="100ml">100ml</option>
+                                        <option value="250ml">250ml</option>
+                                        <option value="500ml">500ml</option>
+                                        <option value="1L">1L</option>
+                                        <option value="5L">5L</option>
+                                        <option value="10L">10L</option>
+                                        <option value="250gm">250gm</option>
+                                        <option value="500gm">500gm</option>
+                                        <option value="1kg">1kg</option>
+                                        <option value="5kg">5kg</option>
+                                        <option value="Bulk">Bulk</option>
+                                        <option value="custom">Custom...</option>
+                                    </select>
                                 </div>
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Label Mode</label>
+                                    <select id="prodLabelMode" required class="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                                        <option value="normal">Normal Label</option>
+                                        <option value="white">White Label</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <!-- Multi Pack Size Selection -->
+                            <div class="border border-gray-200 rounded-lg p-4 bg-blue-50">
+                                <p class="text-sm font-bold text-gray-700 mb-3">🔄 Split Pack Sizes (Select Multiple)</p>
+                                <p class="text-xs text-gray-600 mb-4">Select one or more pack sizes and enter quantity for each. The app will auto-fill packing and labels separately for each pack size so employees can review each requirement clearly.</p>
+                                <div class="mb-4 text-xs text-gray-700 bg-white border border-blue-200 rounded p-3">
+                                    <label class="block font-bold text-gray-800 mb-2">Universal Pack Defaults</label>
+                                    <p class="text-gray-600">Employees do not need to choose a source. If a formula has pack-size details, the app uses them first. If not, it automatically uses the separate universal pack defaults maintained in the Inventory app.</p>
+                                    <div id="universalPackDetailsPreview" class="mt-3 border border-blue-100 rounded bg-blue-50 p-2 text-xs text-gray-700">
+                                        <span class="text-gray-500">Select a product to view saved pack-size details.</span>
+                                    </div>
+                                </div>
+                                <div id="packSizeCheckboxes" class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                                    <!-- Checkboxes will be generated here -->
+                                </div>
+                                <div id="packSizeQuantityInputs" class="space-y-2 mt-3 mb-3">
+                                    <!-- Quantity inputs for each selected pack size -->
+                                </div>
+                                <div id="packSizeSummary" class="mt-3 p-3 bg-white rounded border border-gray-300 text-sm text-gray-700 hidden">
+                                    <!-- Summary will show: "50L (1L pack) + 50L (500ml pack) = 100L total" -->
+                                </div>
+                                <div id="batchPackOverrideCard" class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 hidden">
+                                    <div class="flex items-center justify-between gap-3 mb-2">
+                                        <p class="font-bold">Missing pack details? Add batch-only details here</p>
+                                        <button type="button" onclick="toggleBatchPackOverrideEditor()" class="px-2 py-1 text-xs bg-white border border-amber-300 rounded hover:bg-amber-100">Edit Batch Pack Details</button>
+                                    </div>
+                                    <p id="batchPackOverrideHint" class="text-[11px]">These details apply only to this request batch and will not be saved to Inventory universal defaults.</p>
+                                    <div id="batchPackOverrideEditor" class="mt-2 hidden bg-white border border-amber-200 rounded p-2"></div>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-1 gap-4">
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Planned Quantity (Target)</label>
+                                    <div class="flex gap-4">
+                                        <input type="number" id="prodQuantity" required step="0.01" 
+                                               class="flex-1 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                 placeholder="100" onchange="updateOverageDisplay(); if(typeof autoFillPackingMaterials==='function') autoFillPackingMaterials(); if(typeof updateMultiPackMaterials==='function') updateMultiPackMaterials();">
+                                        <input type="text" id="prodUnit" readonly 
+                                               class="w-24 px-4 py-3 border rounded-lg bg-gray-100"
+                                               placeholder="L">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div id="prodPackageTypeCustomWrap" class="hidden">
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Custom Package</label>
+                                <input type="text" id="prodPackageTypeCustom" class="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g., 750ml / 20kg Drum">
                             </div>
                             
                             <div>
@@ -1697,7 +1840,7 @@
                     <!-- Wizard footer: Back, Next, Submit -->
                     <div id="wizard-footer" class="mt-6 flex gap-4 flex-wrap">
                         <button type="button" id="wizard-back-btn" onclick="goToNewRequestWizardStep(newRequestWizardStep - 1)" class="btn-secondary" style="display:none">← Back</button>
-                        <button type="button" id="wizard-next-btn" onclick="var s=window.newRequestWizardStep||1; if(s===1 && window.newRequestWizardType) goToNewRequestWizardStep(2); else if(s===2) goToNewRequestWizardStep(3); else if(s===3) goToNewRequestWizardStep(4);" class="btn-primary">Next →</button>
+                        <button type="button" id="wizard-next-btn" onclick="handleWizardNext();" class="btn-primary">Next →</button>
                         <button type="button" id="wizard-submit-btn" onclick="submitFromWizard()" class="btn-primary" style="display:none">Submit for Approval</button>
                     </div>
                 </div>
@@ -1707,6 +1850,7 @@
             goToNewRequestWizardStep(1);
             var researchForm = document.getElementById('researchFormForm');
             if (researchForm) researchForm.setAttribute('novalidate', 'novalidate');
+            disableEnterKeyInRequestForms();
         }
 
         // ==========================================
@@ -1754,6 +1898,815 @@
             } catch (e) {}
         }
 
+        function disableEnterKeyInRequestForms() {
+            const forms = [document.getElementById('productionFormForm'), document.getElementById('researchFormForm')].filter(Boolean);
+            forms.forEach(form => {
+                form.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Enter') return;
+                    const tag = String((e.target && e.target.tagName) || '').toLowerCase();
+                    if (tag === 'textarea') return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+            });
+
+            // Extra guard: block Enter globally while New Request view is open
+            if (!window.__reqEnterBlockBound) {
+                document.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Enter') return;
+                    const prodForm = document.getElementById('productionFormForm');
+                    const resForm = document.getElementById('researchFormForm');
+                    const prodVisible = prodForm && !prodForm.closest('.hidden');
+                    const resVisible = resForm && !resForm.closest('.hidden');
+                    if (!prodVisible && !resVisible) return;
+                    const tag = String((e.target && e.target.tagName) || '').toLowerCase();
+                    if (tag === 'textarea') return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+                window.__reqEnterBlockBound = true;
+            }
+        }
+
+        // ====================================================================  
+        // AUTO-FILL PACKING MATERIALS WITH CHANGE TRACKING
+        // ====================================================================
+        window.autoFilledMaterialsTracker = {}; // Track original auto-filled values
+        window.universalPackDetails = window.universalPackDetails || {};
+        window.batchPackDetailsOverrides = window.batchPackDetailsOverrides || {};
+
+        function normalizePackSizeToken(value) {
+            return String(value || '').replace(/\s+/g, '').toLowerCase();
+        }
+
+        function detectProductMeasureMode(productName) {
+            const formulas = cachedFormData && Array.isArray(cachedFormData.formulas) ? cachedFormData.formulas : [];
+            const formula = formulas.find(f => f && String(f.name) === String(productName));
+            const unit = String((formula && formula.outputUnit) || (document.getElementById('prodUnit') || {}).value || '').toLowerCase();
+            if (unit === 'l' || unit === 'ml' || unit.indexOf('lit') >= 0 || unit.indexOf('ltr') >= 0) return 'liquid';
+            if (unit === 'kg' || unit === 'gm' || unit.indexOf('gram') >= 0) return 'weight';
+            return 'all';
+        }
+
+        function packSizeMatchesMode(packSize, mode) {
+            const token = String(packSize || '').trim().toLowerCase();
+            if (!token || token === 'bulk') return true;
+            if (mode === 'liquid') return /ml$|l$/i.test(token);
+            if (mode === 'weight') return /gm$|kg$/i.test(token);
+            return true;
+        }
+
+        function isGroupedConsumableName(name) {
+            return /(tape|strap|strapping|belt)/i.test(String(name || ''));
+        }
+
+        function isCartonStyleName(name) {
+            return /(box|carton|corrugated)/i.test(String(name || ''));
+        }
+
+        function normalizePackRule(entry, itemName) {
+            const rawQty = parseFloat((entry && entry.quantity) || 0) || 0;
+            const rawCoverage = parseFloat((entry && (entry.coverageQty || entry.coveragePacks)) || 0) || 0;
+            const rawMode = String((entry && entry.roundingMode) || '').toLowerCase();
+
+            // Backward compatibility for older carton config stored like 0.1 box per pack.
+            // Interpret 0.1 as 1 carton per 10 packs with round-up behavior.
+            if (isCartonStyleName(itemName) && rawQty > 0 && rawQty < 1 && rawCoverage <= 0 && !rawMode) {
+                return {
+                    qtyPerCoverage: 1,
+                    coverageQty: Math.round(1 / rawQty),
+                    roundingMode: 'ceil'
+                };
+            }
+
+            return {
+                qtyPerCoverage: rawQty,
+                coverageQty: rawCoverage > 0 ? rawCoverage : 1,
+                roundingMode: rawMode || 'exact'
+            };
+        }
+
+        function shouldAutoCalculatePackEntry(entry, itemName) {
+            if (!entry) return false;
+            if (entry.category === 'labels') return true;
+            return !isGroupedConsumableName(itemName);
+        }
+
+        function getPackRequirementEntries(formula, packSize) {
+            if (!formula || !formula.packingRequirements) return [];
+            const raw = formula.packingRequirements[packSize];
+            if (Array.isArray(raw)) return raw;
+            if (raw && Array.isArray(raw.materials)) return raw.materials;
+            return [];
+        }
+
+        function isLiquidProductFormula(formula) {
+            const unit = String((formula && formula.outputUnit) || (document.getElementById('prodUnit') || {}).value || '').toLowerCase();
+            return unit === 'l' || unit === 'ml' || unit.indexOf('lit') >= 0;
+        }
+
+        function getUniversalPackEntries(packSize) {
+            const all = window.universalPackDetails || {};
+            const direct = all[packSize];
+            if (Array.isArray(direct)) return direct;
+            if (direct && Array.isArray(direct.materials)) return direct.materials;
+
+            // Fallback for case/spacing token differences between apps (e.g. 100ml vs 100 ML)
+            const wanted = normalizePackSizeToken(packSize);
+            const fallbackKey = Object.keys(all).find(key => normalizePackSizeToken(key) === wanted);
+            if (!fallbackKey) return [];
+            const raw = all[fallbackKey];
+            if (Array.isArray(raw)) return raw;
+            if (raw && Array.isArray(raw.materials)) return raw.materials;
+            return [];
+        }
+
+        function getAvailablePackSizesForProduct(productName) {
+            const allDefaults = ['100ml', '250ml', '500ml', '1L', '5L', '10L', '250gm', '500gm', '1kg', '2kg', '5kg', 'Bulk'];
+            const mode = detectProductMeasureMode(productName);
+            const defaults = allDefaults.filter(size => packSizeMatchesMode(size, mode));
+            const merged = {};
+            defaults.forEach(size => { merged[size] = true; });
+
+            const formulas = cachedFormData && Array.isArray(cachedFormData.formulas) ? cachedFormData.formulas : [];
+            const formula = formulas.find(f => f && String(f.name) === String(productName));
+            const formulaPackSizes = formula && formula.packingRequirements ? Object.keys(formula.packingRequirements) : [];
+            formulaPackSizes.forEach(size => { if (size && packSizeMatchesMode(size, mode)) merged[size] = true; });
+
+            Object.keys(window.universalPackDetails || {}).forEach(size => { if (size && packSizeMatchesMode(size, mode)) merged[size] = true; });
+
+            const orderedDefaults = defaults.filter(size => merged[size]);
+            const extra = Object.keys(merged).filter(size => defaults.indexOf(size) === -1).sort((a, b) => String(a).localeCompare(String(b)));
+            return orderedDefaults.concat(extra);
+        }
+
+        function filterSinglePackageTypeOptions(productName) {
+            const select = document.getElementById('prodPackageType');
+            if (!select) return;
+            const mode = detectProductMeasureMode(productName);
+            Array.from(select.options).forEach(option => {
+                const value = option.value || '';
+                if (!value || value === 'custom') {
+                    option.hidden = false;
+                    return;
+                }
+                option.hidden = !packSizeMatchesMode(value, mode);
+            });
+            if (select.value && select.value !== 'custom' && !packSizeMatchesMode(select.value, mode)) {
+                select.value = '';
+            }
+        }
+
+        function renderUniversalPackDetailsPreview(productName) {
+            const el = document.getElementById('universalPackDetailsPreview');
+            if (!el) return;
+            if (!productName) {
+                el.innerHTML = '<span class="text-gray-500">Select a product to view saved pack-size details.</span>';
+                return;
+            }
+
+            const formulas = cachedFormData && Array.isArray(cachedFormData.formulas) ? cachedFormData.formulas : [];
+            const formula = formulas.find(f => f && String(f.name) === String(productName));
+            const allSizes = getAvailablePackSizesForProduct(productName);
+            const rows = [];
+
+            allSizes.forEach(size => {
+                const formulaEntries = getPackRequirementEntries(formula, size);
+                const universalEntries = getUniversalPackEntries(size);
+                const resolved = formulaEntries.length ? formulaEntries : universalEntries;
+                if (!resolved.length) return;
+                const source = formulaEntries.length ? 'Formula' : 'Universal';
+                const materialCount = resolved.length;
+                rows.push('<div class="flex items-center justify-between gap-3 py-1 border-b border-blue-100 last:border-b-0">'
+                    + '<span class="font-semibold text-gray-800">' + size + '</span>'
+                    + '<span class="text-gray-600">' + materialCount + ' material' + (materialCount > 1 ? 's' : '') + '</span>'
+                    + '<span class="px-2 py-0.5 rounded bg-white border border-blue-200 text-blue-700 text-[11px]">' + source + '</span>'
+                    + '</div>');
+            });
+
+            if (!rows.length) {
+                el.innerHTML = '<span class="text-amber-700">No saved pack-size details found for this product yet.</span>';
+                return;
+            }
+
+            el.innerHTML = '<div class="font-semibold text-gray-800 mb-1">Saved Pack Size Details</div>' + rows.join('');
+        }
+
+        function getResolvedPackMaterials(formula, packSize) {
+            const directEntries = getPackRequirementEntries(formula, packSize);
+            if (directEntries.length) {
+                return { materials: directEntries, source: 'packSpecific' };
+            }
+
+            const universalEntries = getUniversalPackEntries(packSize);
+            if (universalEntries.length) {
+                return { materials: universalEntries, source: 'universalPack' };
+            }
+
+            const normalized = normalizePackSizeToken(packSize);
+            const overrideKey = Object.keys(window.batchPackDetailsOverrides || {}).find(k => normalizePackSizeToken(k) === normalized);
+            const overrideEntries = overrideKey ? (window.batchPackDetailsOverrides[overrideKey] || []) : [];
+            const validOverrideEntries = overrideEntries.filter(function (entry) {
+                const qty = parseFloat(entry && entry.quantity);
+                return entry && entry.itemId && qty > 0;
+            });
+            if (validOverrideEntries.length) {
+                return { materials: validOverrideEntries, source: 'batchOverride' };
+            }
+
+            return { materials: [], source: 'none' };
+        }
+
+        function getMissingSplitPackSizesWithoutBatchOverride(productName) {
+            const missing = [];
+            if (!productName) return missing;
+            const formulaDrivenProducts = cachedFormData && cachedFormData.formulas
+                ? cachedFormData.formulas.filter(f => f && f.name)
+                : [];
+            const formula = formulaDrivenProducts.find(f => String(f.name) === String(productName));
+            const selectedEntries = Object.entries(window.selectedPackSizes || {}).filter(([_, qty]) => (parseFloat(qty) || 0) > 0);
+            selectedEntries.forEach(([packSize]) => {
+                const formulaEntries = getPackRequirementEntries(formula, packSize);
+                const universalEntries = getUniversalPackEntries(packSize);
+                const normalized = normalizePackSizeToken(packSize);
+                const overrideKey = Object.keys(window.batchPackDetailsOverrides || {}).find(k => normalizePackSizeToken(k) === normalized);
+                const overrideEntries = overrideKey ? (window.batchPackDetailsOverrides[overrideKey] || []) : [];
+                const validOverrideEntries = overrideEntries.filter(function (entry) {
+                    const qty = parseFloat(entry && entry.quantity);
+                    return entry && entry.itemId && qty > 0;
+                });
+                if (!formulaEntries.length && !universalEntries.length && !validOverrideEntries.length) {
+                    missing.push(packSize);
+                }
+            });
+            return missing;
+        }
+
+        function buildBatchOverrideMaterialOptions(selectedItemId) {
+            const packingItems = (cachedFormData && cachedFormData.packingMaterials) ? cachedFormData.packingMaterials : [];
+            const labelItems = (cachedFormData && cachedFormData.labels) ? cachedFormData.labels : [];
+            const merged = [];
+            packingItems.forEach(item => merged.push({ id: item.id || item.name, name: item.name || item.id, unit: item.unit || '', category: 'packingMaterials' }));
+            labelItems.forEach(item => merged.push({ id: item.id || item.name, name: item.name || item.id, unit: item.unit || '', category: 'labels' }));
+            merged.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            let html = '<option value="">Select material...</option>';
+            merged.forEach(item => {
+                const selected = String(item.id) === String(selectedItemId) ? 'selected' : '';
+                const safeId = String(item.id).replace(/"/g, '&quot;');
+                const safeUnit = String(item.unit || '').replace(/"/g, '&quot;');
+                const safeName = String(item.name || '').replace(/</g, '&lt;');
+                const tag = item.category === 'labels' ? 'Label' : 'Packing';
+                html += `<option value="${safeId}" data-category="${item.category}" data-unit="${safeUnit}" ${selected}>[${tag}] ${safeName}</option>`;
+            });
+            return html;
+        }
+
+        function renderBatchPackOverrideEditor() {
+            const card = document.getElementById('batchPackOverrideCard');
+            const hint = document.getElementById('batchPackOverrideHint');
+            const editor = document.getElementById('batchPackOverrideEditor');
+            if (!card || !hint || !editor) return;
+            const productName = (document.getElementById('productSelect') || {}).value || '';
+            const selectedEntries = Object.entries(window.selectedPackSizes || {}).filter(([_, qty]) => (parseFloat(qty) || 0) > 0);
+            if (!selectedEntries.length) {
+                card.classList.add('hidden');
+                editor.classList.add('hidden');
+                return;
+            }
+
+            card.classList.remove('hidden');
+            const missing = getMissingSplitPackSizesWithoutBatchOverride(productName);
+            hint.textContent = missing.length
+                ? ('Missing pack details for: ' + missing.join(', ') + '. Add temporary details below to continue.')
+                : 'All selected split pack sizes have details. Batch-only editor is optional.';
+
+            const candidateSizes = selectedEntries.map(([size]) => size);
+            editor.innerHTML = candidateSizes.map(packSize => {
+                const rows = window.batchPackDetailsOverrides[packSize] || [];
+                const rowsHtml = rows.length ? rows.map((entry, idx) => {
+                    const safeSize = String(packSize).replace(/'/g, "\\'");
+                    return `
+                        <div class="flex gap-2 items-center mb-2" data-batch-override-size="${packSize}" data-batch-override-index="${idx}">
+                            <select class="batch-override-item flex-1 p-1 border rounded text-xs" onchange="persistBatchPackOverride('${safeSize}')">
+                                ${buildBatchOverrideMaterialOptions(entry.itemId)}
+                            </select>
+                            <input type="number" step="0.01" min="0" class="batch-override-qty w-24 p-1 border rounded text-right text-xs" placeholder="Qty/pack" value="${entry.quantity || ''}" onchange="persistBatchPackOverride('${safeSize}')">
+                            <span class="batch-override-unit text-[10px] text-gray-500 w-10 text-center">${entry.unit || ''}</span>
+                            <button type="button" class="text-red-500" onclick="removeBatchPackOverrideRow('${safeSize}', ${idx})">X</button>
+                        </div>
+                    `;
+                }).join('') : '<p class="text-[11px] text-gray-500 mb-2">No batch-only rows added.</p>';
+                const mark = missing.indexOf(packSize) >= 0 ? '(missing)' : '';
+                const safeSize = String(packSize).replace(/'/g, "\\'");
+                const cardClass = missing.indexOf(packSize) >= 0 ? 'bg-amber-50' : 'bg-gray-50';
+                return `
+                    <div class="mb-3 border border-gray-200 rounded p-2 ${cardClass}">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-bold text-gray-700">${packSize} ${mark}</span>
+                            <button type="button" class="text-xs text-blue-600" onclick="addBatchPackOverrideRow('${safeSize}')">+ Add row</button>
+                        </div>
+                        ${rowsHtml}
+                    </div>
+                `;
+            }).join('');
+
+            editor.querySelectorAll('.batch-override-item').forEach(sel => {
+                sel.onchange = function () {
+                    const row = this.closest('[data-batch-override-size]');
+                    if (!row) return;
+                    const unitEl = row.querySelector('.batch-override-unit');
+                    const opt = this.options[this.selectedIndex];
+                    if (unitEl) unitEl.textContent = opt && opt.dataset.unit ? opt.dataset.unit : '';
+                    const size = row.dataset.batchOverrideSize;
+                    if (size) persistBatchPackOverride(size);
+                };
+            });
+        }
+
+        function toggleBatchPackOverrideEditor() {
+            const editor = document.getElementById('batchPackOverrideEditor');
+            if (!editor) return;
+            renderBatchPackOverrideEditor();
+            editor.classList.toggle('hidden');
+        }
+
+        function addBatchPackOverrideRow(packSize) {
+            if (!window.batchPackDetailsOverrides[packSize]) window.batchPackDetailsOverrides[packSize] = [];
+            window.batchPackDetailsOverrides[packSize].push({ itemId: '', category: 'packingMaterials', quantity: '', unit: '' });
+            renderBatchPackOverrideEditor();
+            const editor = document.getElementById('batchPackOverrideEditor');
+            if (editor) editor.classList.remove('hidden');
+            if (typeof updateMultiPackMaterials === 'function') updateMultiPackMaterials();
+        }
+
+        function removeBatchPackOverrideRow(packSize, index) {
+            const rows = window.batchPackDetailsOverrides[packSize] || [];
+            rows.splice(index, 1);
+            window.batchPackDetailsOverrides[packSize] = rows;
+            renderBatchPackOverrideEditor();
+            if (typeof updateMultiPackMaterials === 'function') updateMultiPackMaterials();
+        }
+
+        function persistBatchPackOverride(packSize) {
+            const editor = document.getElementById('batchPackOverrideEditor');
+            if (!editor) return;
+            const rows = [];
+            editor.querySelectorAll(`[data-batch-override-size="${packSize}"]`).forEach(row => {
+                const sel = row.querySelector('.batch-override-item');
+                const qtyInput = row.querySelector('.batch-override-qty');
+                if (!sel) return;
+                const qtyRaw = qtyInput ? String(qtyInput.value || '').trim() : '';
+                const qty = qtyRaw === '' ? '' : (parseFloat(qtyRaw) || 0);
+                const opt = sel.options[sel.selectedIndex];
+                rows.push({
+                    itemId: sel.value,
+                    category: opt && opt.dataset.category ? opt.dataset.category : 'packingMaterials',
+                    quantity: qty,
+                    unit: opt && opt.dataset.unit ? opt.dataset.unit : ''
+                });
+            });
+            window.batchPackDetailsOverrides[packSize] = rows;
+            renderBatchPackOverrideEditor();
+            if (typeof updateMultiPackMaterials === 'function') updateMultiPackMaterials();
+        }
+
+        function getProductionScaleForSinglePack(packSize) {
+            const plannedQty = parseFloat((document.getElementById('prodQuantity') || {}).value) || 0;
+            if (plannedQty <= 0) return 1;
+            const baseQty = getPackSizeBaseQuantity(packSize) || 1;
+            if (baseQty <= 0) return 1;
+            return plannedQty / baseQty;
+        }
+
+        function calculatePackRequirementQty(entry, packCount, itemName) {
+            const normalized = normalizePackRule(entry, itemName);
+            const qtyPerCoverage = normalized.qtyPerCoverage;
+            const coverageQty = normalized.coverageQty;
+            const roundingMode = normalized.roundingMode;
+            if (packCount <= 0 || qtyPerCoverage <= 0 || coverageQty <= 0) return 0;
+            const groups = packCount / coverageQty;
+            if (roundingMode === 'ceil' || roundingMode === 'roundup' || roundingMode === 'up') {
+                return qtyPerCoverage * Math.ceil(groups);
+            }
+            return qtyPerCoverage * groups;
+        }
+
+        function buildProductionItemOptions(categoryKey, selectedItemId) {
+            const source = cachedFormData && cachedFormData[categoryKey] ? cachedFormData[categoryKey] : [];
+            let opts = '<option value="">Select...</option>';
+            (source || []).forEach(m => {
+                const id = (m.id || m.name || '').toString().replace(/"/g, '&quot;');
+                const name = (m.name || m.id || '').toString();
+                const unit = (m.unit || '').toString().replace(/"/g, '&quot;');
+                const selected = String(m.id || m.name) === String(selectedItemId) ? 'selected' : '';
+                opts += `<option value="${id}" data-name="${name.replace(/"/g, '&quot;')}" data-unit="${unit}" ${selected}>${name.replace(/</g, '&lt;')}</option>`;
+            });
+            return opts;
+        }
+        
+        function autoFillPackingMaterials() {
+            const productSelect = document.getElementById('productSelect');
+            const packTypeSelect = document.getElementById('prodPackageType');
+            const packingContainer = document.getElementById('prodPackingRows');
+            const labelsContainer = document.getElementById('prodLabelsRows');
+
+            if (!productSelect || !packTypeSelect || !packingContainer || !labelsContainer) return;
+
+            const productName = productSelect.value;
+            const packSize = packTypeSelect.value;
+
+            if (!productName || !packSize) return;
+
+            const activeSplitEntries = Object.entries(window.selectedPackSizes || {}).filter(([_, qty]) => qty > 0);
+            if (activeSplitEntries.length) {
+                if (typeof updateMultiPackMaterials === 'function') updateMultiPackMaterials();
+                return;
+            }
+
+            // Find the formula
+            const formulaDrivenProducts = cachedFormData && cachedFormData.formulas
+                ? cachedFormData.formulas.filter(f => f && f.name)
+                : [];
+            const formula = formulaDrivenProducts.find(f => String(f.name) === String(productName));
+
+            const resolved = getResolvedPackMaterials(formula, packSize);
+            if (!resolved.materials.length) return;
+
+            const scale = getProductionScaleForSinglePack(packSize);
+
+            // Clear existing rows
+            packingContainer.innerHTML = '';
+            labelsContainer.innerHTML = '';
+            
+            // Initialize tracker for this selection
+            const trackKey = `${productName}_${packSize}`;
+            window.autoFilledMaterialsTracker[trackKey] = [];
+
+            // Auto-fill packing materials
+            resolved.materials.forEach((mat, idx) => {
+                const container = mat.category === 'labels' ? labelsContainer : packingContainer;
+                const categoryKey = mat.category === 'labels' ? 'labels' : 'packingMaterials';
+                const role = mat.category === 'labels' ? 'labels' : 'packing';
+                const optionsHtml = buildProductionItemOptions(categoryKey, mat.itemId);
+                
+                // Find the material item for display
+                const items = cachedFormData && cachedFormData[categoryKey] ? cachedFormData[categoryKey] : [];
+                const item = items.find(m => (m.id || m.name) == mat.itemId);
+                const matName = item ? item.name : String(mat.itemId);
+                const matUnit = mat.unit || (item ? item.unit : 'Unit');
+                if (!shouldAutoCalculatePackEntry(mat, matName)) return;
+                const adjustedQty = calculatePackRequirementQty(mat, scale, matName);
+
+                // Create row 
+                const row = document.createElement('div');
+                row.className = 'flex gap-2 items-center';
+                const rowId = (mat.category === 'labels' ? 'auto-label-' : 'auto-pack-') + mat.itemId;
+                row.dataset.rowId = rowId;
+                row.dataset.autoFilled = 'true';
+                row.dataset.originalQty = adjustedQty;
+                const tooltip = resolved.source === 'universalPack'
+                    ? 'Auto-filled from universal pack defaults'
+                    : (resolved.source === 'batchOverride' ? 'Auto-filled from batch-only details' : 'Auto-filled from formula');
+                
+                row.innerHTML = `
+                    <select class="prod-pack-select flex-1 px-2 py-1.5 border rounded text-sm bg-blue-50" data-role="${role}" data-auto-filled="true" title="${tooltip}" onchange="trackMaterialSelectChange(this);">
+                        ${optionsHtml}
+                    </select>
+                    <input type="number" class="prod-pack-qty auto-filled-qty w-20 px-2 py-1.5 border rounded text-sm" step="0.01" min="0" value="${adjustedQty.toFixed(3)}" data-original-qty="${adjustedQty}" onchange="trackMaterialChange(this);">
+                    <span class="prod-pack-unit text-xs text-gray-500 w-8">${matUnit}</span>
+                    <div data-auto-badge="true" title="${tooltip}" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded font-bold">AUTO</div>
+                    <button type="button" onclick="this.closest('[data-row-id]').remove()" class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+                `;
+
+                const select = row.querySelector('.prod-pack-select');
+                if (select) {
+                    select.onchange = function () {
+                        const opt = this.options[this.selectedIndex];
+                        row.querySelector('.prod-pack-unit').textContent = opt && opt.dataset.unit ? opt.dataset.unit : '';
+                        trackMaterialSelectChange(this);
+                    };
+                }
+                
+                container.appendChild(row);
+                
+                // Track original value
+                window.autoFilledMaterialsTracker[trackKey].push({
+                    itemId: mat.itemId,
+                    itemName: matName,
+                    category: mat.category,
+                    originalQty: adjustedQty,
+                    unit: matUnit,
+                    rowId: rowId
+                });
+            });
+
+            // Show toast
+            if (typeof showToast === 'function') {
+                const sourceLabel = resolved.source === 'universalPack'
+                    ? 'universal pack defaults'
+                    : (resolved.source === 'batchOverride' ? 'batch-only details' : 'formula');
+                showToast(`✅ Auto-filled ${resolved.materials.length} item(s) for ${packSize} pack using ${sourceLabel}`, 'success');
+            }
+        }
+        
+        function trackMaterialChange(inputElement) {
+            const row = inputElement.closest('[data-row-id]');
+            if (!row) return;
+            
+            const originalQty = parseFloat(row.dataset.originalQty);
+            const currentQty = parseFloat(inputElement.value);
+            
+            // Update visual indicator
+            if (originalQty !== currentQty) {
+                // Mark as changed
+                const autoLabel = row.querySelector('[data-auto-badge="true"]');
+                if (autoLabel) {
+                    autoLabel.className = 'px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded font-bold';
+                    autoLabel.textContent = 'MODIFIED';
+                    autoLabel.title = `Changed from ${originalQty} to ${currentQty}`;
+                }
+            } else {
+                // Reset to original
+                const autoLabel = row.querySelector('[data-auto-badge="true"]');
+                if (autoLabel) {
+                    autoLabel.className = 'px-2 py-1 text-xs bg-green-100 text-green-700 rounded font-bold';
+                    autoLabel.textContent = 'AUTO';
+                    autoLabel.title = 'Auto-filled';
+                }
+            }
+        }
+
+        function trackMaterialSelectChange(selectElement) {
+            const row = selectElement.closest('[data-row-id]');
+            if (!row) return;
+            const autoLabel = row.querySelector('[data-auto-badge="true"]');
+            if (autoLabel) {
+                autoLabel.className = 'px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded font-bold';
+                autoLabel.textContent = 'MODIFIED';
+                autoLabel.title = 'Item changed manually';
+            }
+        }
+
+        // ====================================================================
+        // MULTI-PACK-SIZE SELECTION & OVERAGE TRACKING
+        // ====================================================================
+        window.selectedPackSizes = {}; // { "1L": 50, "500ml": 50 }
+        
+        function initializePackSizeCheckboxes(productName) {
+            const checkboxContainer = document.getElementById('packSizeCheckboxes');
+            const quantityContainer = document.getElementById('packSizeQuantityInputs');
+            if (!checkboxContainer || !quantityContainer) return;
+
+            const packSizes = getAvailablePackSizesForProduct(productName);
+            checkboxContainer.innerHTML = '';
+            quantityContainer.innerHTML = '';
+            window.selectedPackSizes = {};
+            window.batchPackDetailsOverrides = {};
+            
+            // Create checkboxes
+            packSizes.forEach(size => {
+                const label = document.createElement('label');
+                label.className = 'flex items-center gap-2 p-2 border rounded cursor-pointer hover:bg-blue-100';
+                label.innerHTML = `
+                    <input type="checkbox" value="${size}" onchange="togglePackSize('${size}'); updateMultiPackMaterials();" class="pack-size-checkbox">
+                    <span class="text-sm font-medium">${size}</span>
+                `;
+                checkboxContainer.appendChild(label);
+            });
+            if (typeof renderBatchPackOverrideEditor === 'function') {
+                renderBatchPackOverrideEditor();
+            }
+        }
+        
+        function togglePackSize(packSize) {
+            const checkboxes = document.querySelectorAll('.pack-size-checkbox');
+            const checked = Array.from(checkboxes).filter(cb => cb.checked);
+            const quantityContainer = document.getElementById('packSizeQuantityInputs');
+
+            // Preserve already-entered quantities before rebuilding the UI.
+            const previousValues = Object.assign({}, window.selectedPackSizes || {});
+            if (quantityContainer) {
+                quantityContainer.querySelectorAll('.pack-qty-input').forEach(input => {
+                    const size = input.dataset.packSize;
+                    if (!size) return;
+                    previousValues[size] = parseFloat(input.value) || 0;
+                });
+            }
+
+            window.selectedPackSizes = {};
+            quantityContainer.innerHTML = '';
+            
+            checked.forEach(cb => {
+                const size = cb.value;
+                const existingQty = previousValues[size] || 0;
+                window.selectedPackSizes[size] = existingQty;
+                
+                // Create quantity input for each selected pack size
+                const div = document.createElement('div');
+                div.className = 'flex gap-2 items-center';
+                div.innerHTML = `
+                    <span class="text-sm font-medium text-gray-700 w-24">${size}</span>
+                    <input type="number" class="pack-qty-input flex-1 px-3 py-2 border rounded text-sm" 
+                           data-pack-size="${size}" step="0.01" min="0" placeholder="Enter quantity"
+                           value="${existingQty > 0 ? existingQty : ''}"
+                           onchange="window.selectedPackSizes['${size}'] = parseFloat(this.value) || 0; updatePackSizeSummary(); updateMultiPackMaterials();">
+                `;
+                quantityContainer.appendChild(div);
+            });
+
+            updatePackSizeSummary();
+        }
+        
+        function updatePackSizeSummary() {
+            const summary = document.getElementById('packSizeSummary');
+            const unit = ((document.getElementById('prodUnit') || {}).value || 'L').trim() || 'L';
+            const grandTotal = Object.values(window.selectedPackSizes).reduce((a, b) => a + b, 0);
+            
+            const entries = Object.entries(window.selectedPackSizes)
+                .filter(([_, qty]) => qty > 0)
+                .map(([size, qty]) => `${qty}${unit} (${size} pack)`)
+                .join(' + ');
+            
+            if (grandTotal > 0) {
+                summary.innerHTML = `📊 <strong>${entries} = ${grandTotal}${unit} total</strong>`;
+                summary.classList.remove('hidden');
+
+                // Do not overwrite planned target; show only split summary for operator review.
+                updateOverageDisplay();
+            } else {
+                summary.classList.add('hidden');
+            }
+            if (typeof renderBatchPackOverrideEditor === 'function') {
+                renderBatchPackOverrideEditor();
+            }
+        }
+        
+        function getPackSizeBaseQuantity(packSize) {
+            const match = String(packSize || '').trim().match(/^([0-9]*\.?[0-9]+)\s*(ml|l|gm|kg)$/i);
+            if (!match) return 1;
+            const amount = parseFloat(match[1]) || 1;
+            const unit = match[2].toLowerCase();
+            if (unit === 'ml') return amount / 1000;
+            if (unit === 'l') return amount;
+            if (unit === 'gm') return amount / 1000;
+            if (unit === 'kg') return amount;
+            return 1;
+        }
+
+        function createAutoFilledMaterialRow(options) {
+            const row = document.createElement('div');
+            row.className = 'flex gap-2 items-center text-sm';
+            row.dataset.rowId = options.rowId;
+            row.dataset.autoFilled = 'true';
+            row.dataset.originalQty = options.originalQty;
+            row.dataset.packSize = options.packSize;
+            row.innerHTML = `
+                <select class="prod-pack-select flex-1 px-2 py-1.5 border rounded text-sm bg-blue-50" data-role="${options.role || 'packing'}" data-auto-filled="true" title="${options.tooltip}" onchange="trackMaterialSelectChange(this);">
+                    ${options.optionsHtml || ''}
+                </select>
+                <input type="number" class="prod-pack-qty auto-filled-qty w-20 px-2 py-1.5 border rounded text-sm" step="0.01" min="0" value="${options.originalQty}" data-original-qty="${options.originalQty}" onchange="trackMaterialChange(this);">
+                <span class="prod-pack-unit text-xs text-gray-500 w-10">${options.unit}</span>
+                <div data-auto-badge="true" title="${options.tooltip}" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded font-bold">AUTO</div>
+                <button type="button" onclick="this.closest('[data-row-id]').remove()" class="text-red-500 hover:text-red-700 font-bold">✕</button>
+            `;
+            const select = row.querySelector('.prod-pack-select');
+            if (select) {
+                select.onchange = function () {
+                    const opt = this.options[this.selectedIndex];
+                    row.querySelector('.prod-pack-unit').textContent = opt && opt.dataset.unit ? opt.dataset.unit : '';
+                    trackMaterialSelectChange(this);
+                };
+            }
+            return row;
+        }
+
+        function appendPackSizeSection(container, packSize, requestedQty, unitLabel, toneClass) {
+            const header = document.createElement('div');
+            header.className = `mt-3 mb-1 px-3 py-2 rounded border text-xs font-bold uppercase tracking-wide ${toneClass}`;
+            header.textContent = `${packSize} Pack Requirements • ${requestedQty}${unitLabel}`;
+            container.appendChild(header);
+        }
+
+        function updateMultiPackMaterials() {
+            const productSelect = document.getElementById('productSelect');
+            const packingContainer = document.getElementById('prodPackingRows');
+            const labelsContainer = document.getElementById('prodLabelsRows');
+            const unitLabel = ((document.getElementById('prodUnit') || {}).value || 'L').trim() || 'L';
+            
+            if (!productSelect || !packingContainer || !labelsContainer) return;
+            
+            const productName = productSelect.value;
+            if (!productName) return;
+            
+            // Find formula
+            const formulaDrivenProducts = cachedFormData && cachedFormData.formulas
+                ? cachedFormData.formulas.filter(f => f && f.name)
+                : [];
+            const formula = formulaDrivenProducts.find(f => String(f.name) === String(productName));
+
+            const selectedEntries = Object.entries(window.selectedPackSizes).filter(([_, packQty]) => packQty > 0);
+            if (!selectedEntries.length) return;
+
+            // Clear containers only for active multi-pack rendering.
+            // If no split quantities are selected, keep single-pack auto-filled rows intact.
+            packingContainer.innerHTML = '';
+            labelsContainer.innerHTML = '';
+            
+            const trackKey = `${productName}_multi_${selectedEntries.map(([packSize]) => packSize).join('_')}`;
+            window.autoFilledMaterialsTracker[trackKey] = [];
+
+            selectedEntries.forEach(([packSize, packQty]) => {
+                const resolved = getResolvedPackMaterials(formula, packSize);
+                if (!resolved.materials.length) return;
+
+                const packBaseQty = getPackSizeBaseQuantity(packSize) || 1;
+                let hasPackingRows = false;
+                let hasLabelRows = false;
+
+                resolved.materials.forEach(mat => {
+                    const packCount = packBaseQty > 0 ? (packQty / packBaseQty) : 0;
+                    const categoryKey = mat.category === 'labels' ? 'labels' : 'packingMaterials';
+                    const items = cachedFormData && cachedFormData[categoryKey] ? cachedFormData[categoryKey] : [];
+                    const item = items.find(m => String(m.id || m.name) === String(mat.itemId));
+                    const matName = item ? item.name : String(mat.itemId);
+                    const matUnit = mat.unit || (item ? item.unit : 'Unit');
+                    if (!shouldAutoCalculatePackEntry(mat, matName)) return;
+                    const adjustedQty = calculatePackRequirementQty(mat, packCount, matName);
+                    const isLabel = mat.category === 'labels';
+                    const container = isLabel ? labelsContainer : packingContainer;
+
+                    if (isLabel && !hasLabelRows) {
+                        appendPackSizeSection(labelsContainer, packSize, packQty, unitLabel, 'bg-amber-50 border-amber-200 text-amber-900');
+                        hasLabelRows = true;
+                    }
+                    if (!isLabel && !hasPackingRows) {
+                        appendPackSizeSection(packingContainer, packSize, packQty, unitLabel, 'bg-sky-50 border-sky-200 text-sky-900');
+                        hasPackingRows = true;
+                    }
+
+                    const sourceText = resolved.source === 'universalPack'
+                        ? 'Universal pack defaults'
+                        : (resolved.source === 'batchOverride' ? 'Batch-only details' : 'Formula pack setup');
+                    const tooltip = `${packSize} pack auto-fill • ${packQty}${unitLabel} requested • ${sourceText}`;
+                    const originalQty = adjustedQty.toFixed(2);
+                    const optionsHtml = buildProductionItemOptions(categoryKey, mat.itemId);
+                    const row = createAutoFilledMaterialRow({
+                        rowId: `multi-${packSize}-${mat.category}-${mat.itemId}`,
+                        packSize: packSize,
+                        itemId: mat.itemId,
+                        category: mat.category,
+                        name: matName,
+                        unit: matUnit,
+                        role: isLabel ? 'labels' : 'packing',
+                        optionsHtml: optionsHtml,
+                        originalQty: originalQty,
+                        tooltip: tooltip
+                    });
+
+                    container.appendChild(row);
+
+                    window.autoFilledMaterialsTracker[trackKey].push({
+                        itemId: mat.itemId,
+                        itemName: matName,
+                        category: mat.category,
+                        originalQty: adjustedQty,
+                        unit: matUnit,
+                        packSize: packSize,
+                        requestedQty: packQty,
+                        source: resolved.source
+                    });
+                });
+            });
+
+            if (window.autoFilledMaterialsTracker[trackKey].length > 0) {
+                if (typeof showToast === 'function') {
+                    showToast(`✅ Auto-filled separate packing and labels for ${selectedEntries.length} pack sizes`, 'success');
+                }
+            }
+            if (typeof renderBatchPackOverrideEditor === 'function') {
+                renderBatchPackOverrideEditor();
+            }
+        }
+        
+        function updateOverageDisplay() {
+            const plannedEl = document.getElementById('prodQuantity');
+            const actualEl = document.getElementById('prodQuantityActual');
+            const overageDisplay = document.getElementById('overageDisplay');
+            const overageText = document.getElementById('overageText');
+            if (!plannedEl || !actualEl || !overageDisplay || !overageText) return;
+
+            const planned = parseFloat(plannedEl.value) || 0;
+            const actual = parseFloat(actualEl.value) || 0;
+            
+            if (actual > 0 && actual !== planned) {
+                const overage = actual - planned;
+                const percentage = ((overage / planned) * 100).toFixed(1);
+                overageText.textContent = `Planned: ${planned}L | Actual: ${actual}L | Overage: ${overage.toFixed(2)}L (${percentage}%)`;
+                overageDisplay.classList.remove('hidden');
+            } else {
+                overageDisplay.classList.add('hidden');
+            }
+        }
         async function loadFormDropdowns() {
             const productSelect = document.getElementById('productSelect');
             const materialSelect = document.getElementById('materialSelect');
@@ -1784,13 +2737,16 @@
                 const payload = data.data ? {
                     result: 'success',
                     products: data.data.products || [],
+                    formulas: data.data.formulas || [],
                     materials: data.data.materials || [],
                     rawMaterials: data.data.rawMaterials || [],
                     packingMaterials: data.data.packingMaterials || [],
-                    labels: data.data.labels || []
+                    labels: data.data.labels || [],
+                    universalPackDetails: data.data.universalPackDetails || {}
                 } : data;
                 if (!payload.products && !payload.materials) return false;
                 cachedFormData = payload;
+                window.universalPackDetails = payload.universalPackDetails || window.universalPackDetails || {};
                 setFormDataInStorage(payload);
                 if (productSelect) productSelect.disabled = false;
                 if (materialSelect) materialSelect.disabled = false;
@@ -1798,15 +2754,67 @@
                 return true;
             }
 
+            async function hydrateProductsFromFormulas() {
+                try {
+                    const dbData = await callBackend('get_db', {}).catch(() => ({}));
+                    if (!dbData || dbData.result !== 'success' || !dbData.data) return;
+                    const formulas = Array.isArray(dbData.data.formulas) ? dbData.data.formulas : [];
+                    window.universalPackDetails = dbData.data.universalPackDetails || {};
+                    if (!formulas.length) return;
+                    const formulaProducts = formulas
+                        .filter(f => f && f.name)
+                        .map(f => ({ name: f.name, unit: f.outputUnit || 'Units', formulaId: f.id }));
+
+                    cachedFormData = Object.assign({}, cachedFormData || {}, {
+                        formulas: formulas,
+                        products: formulaProducts
+                    });
+                    setFormDataInStorage(cachedFormData);
+                    populateDropdowns(cachedFormData);
+                } catch (e) {
+                    console.warn('Formula hydrate skipped:', e);
+                }
+            }
+
+            async function hydrateUniversalPackDetailsDirect() {
+                try {
+                    if (!USE_FIREBASE || !window.firebase || !firebase.firestore) return;
+                    const snap = await firebase.firestore().collection('Database').doc('latest').get();
+                    if (!snap.exists) return;
+                    const d = snap.data() || {};
+                    const payload = d && d.data ? d.data : d;
+                    const upd = payload && payload.universalPackDetails ? payload.universalPackDetails : {};
+                    if (upd && typeof upd === 'object') {
+                        window.universalPackDetails = upd;
+                    }
+                } catch (e) {
+                    console.warn('Direct universal pack hydrate skipped:', e);
+                }
+            }
+
             try {
                 // 1) Same call as old requisition app – get_lists (Data sheet + FormCache). Fast and reliable.
                 clearTimeout(timeoutId);
                 const data = await callBackend('get_lists', {}).catch(() => ({}));
-                if (applyFormData(data)) return;
+                if (applyFormData(data)) {
+                    await hydrateProductsFromFormulas();
+                    await hydrateUniversalPackDetailsDirect();
+                    if ((document.getElementById('productSelect') || {}).value && (document.getElementById('prodPackageType') || {}).value) {
+                        if (typeof autoFillPackingMaterials === 'function') autoFillPackingMaterials();
+                    }
+                    return;
+                }
 
                 // 2) Fallback: get_form_data (builds from Database if FormCache empty)
                 const fallbackData = await callBackend('get_form_data', {}).catch(() => ({}));
-                if (applyFormData(fallbackData)) return;
+                if (applyFormData(fallbackData)) {
+                    await hydrateProductsFromFormulas();
+                    await hydrateUniversalPackDetailsDirect();
+                    if ((document.getElementById('productSelect') || {}).value && (document.getElementById('prodPackageType') || {}).value) {
+                        if (typeof autoFillPackingMaterials === 'function') autoFillPackingMaterials();
+                    }
+                    return;
+                }
 
                 if (productSelect) {
                     productSelect.disabled = false;
@@ -1834,23 +2842,45 @@
         function populateDropdowns(data) {
             // 1. Populate product dropdown (Production)
             const productSelect = document.getElementById('productSelect');
-            if (productSelect && data.products && data.products.length > 0) {
+            const formulaDrivenProducts = Array.isArray(data.formulas) && data.formulas.length > 0
+                ? data.formulas.filter(f => f && f.name).map(f => ({ name: f.name, unit: f.outputUnit || 'Units', formulaId: f.id }))
+                : [];
+            const productsToRender = formulaDrivenProducts.length > 0 ? formulaDrivenProducts : (Array.isArray(data.products) ? data.products : []);
+            if (productSelect && productsToRender.length > 0) {
                 productSelect.innerHTML = '<option value="">Select product...</option>';
-                data.products.forEach(product => {
+                productsToRender.forEach(product => {
                     const option = document.createElement('option');
                     option.value = product.name;
                     option.textContent = product.name;
                     option.dataset.unit = product.unit || 'L';
+                    if (product.formulaId != null) option.dataset.formulaId = String(product.formulaId);
                     productSelect.appendChild(option);
                 });
 
                 productSelect.onchange = function () {
                     const selectedOption = this.options[this.selectedIndex];
+                    const productName = this.value;
                     if (selectedOption.dataset.unit) {
                         document.getElementById('prodUnit').value = selectedOption.dataset.unit;
                     }
+                    // Initialize pack size checkboxes for multi-pack support
+                    if (typeof initializePackSizeCheckboxes === 'function') {
+                        initializePackSizeCheckboxes(productName);
+                    }
+                    if (typeof filterSinglePackageTypeOptions === 'function') {
+                        filterSinglePackageTypeOptions(productName);
+                    }
+                    if (typeof renderUniversalPackDetailsPreview === 'function') {
+                        renderUniversalPackDetailsPreview(productName);
+                    }
+                    if (typeof autoFillPackingMaterials === 'function' && (document.getElementById('prodPackageType') || {}).value) {
+                        autoFillPackingMaterials();
+                    }
+                    if (typeof updateMultiPackMaterials === 'function') {
+                        updateMultiPackMaterials();
+                    }
                 };
-                console.log(`✅ Populated ${data.products.length} products`);
+                console.log(`✅ Populated ${productsToRender.length} products`);
             }
 
             // 2. Populate material dropdown (Research)
@@ -1926,27 +2956,184 @@
         }
         function getProductionPackingLabelsJson(containerId) {
             const container = document.getElementById(containerId);
-            if (!container) return [];
+            console.log(`[getProductionPackingLabelsJson] Container ${containerId}:`, container);
+            
+            if (!container) {
+                console.log(`[getProductionPackingLabelsJson] Container ${containerId} not found, returning []`);
+                return [];
+            }
+            
             const arr = [];
-            container.querySelectorAll('.prod-pack-select').forEach(sel => {
+            const selects = container.querySelectorAll('.prod-pack-select');
+            console.log(`[getProductionPackingLabelsJson] Found ${selects.length} .prod-pack-select elements in ${containerId}`);
+            
+            selects.forEach((sel, idx) => {
+                console.log(`[getProductionPackingLabelsJson] Processing select ${idx}:`, sel);
                 const opt = sel.options[sel.selectedIndex];
-                if (!opt || !opt.value) return;
+                console.log(`[getProductionPackingLabelsJson]   Selected option:`, opt, 'value:', opt ? opt.value : 'N/A');
+                
+                if (!opt || !opt.value) {
+                    console.log(`[getProductionPackingLabelsJson]   Skipping: no option or no value`);
+                    return;
+                }
+                
                 const qty = parseFloat(sel.closest('[data-row-id]').querySelector('.prod-pack-qty').value);
-                if (isNaN(qty) || qty <= 0) return;
-                arr.push({
+                console.log(`[getProductionPackingLabelsJson]   Quantity:`, qty);
+                
+                if (isNaN(qty) || qty <= 0) {
+                    console.log(`[getProductionPackingLabelsJson]   Skipping: qty is NaN or <= 0`);
+                    return;
+                }
+                
+                const item = {
                     itemId: opt.value,
                     name: opt.dataset.name || opt.textContent,
                     quantity: qty,
                     unit: opt.dataset.unit || ''
-                });
+                };
+                console.log(`[getProductionPackingLabelsJson]   Adding item:`, item);
+                arr.push(item);
             });
+            
+            console.log(`[getProductionPackingLabelsJson] Final result for ${containerId}:`, arr, 'length:', arr.length);
             return arr;
+        }
+
+        function buildProductionFormulaIngredients(productName, requestedQty) {
+            const formulas = cachedFormData && Array.isArray(cachedFormData.formulas) ? cachedFormData.formulas : [];
+            const formula = formulas.find(f => f && String(f.name) === String(productName));
+            if (!formula || !Array.isArray(formula.ingredients) || !formula.ingredients.length) return [];
+
+            const outputQty = parseFloat(formula.outputQty) || 0;
+            const qty = parseFloat(requestedQty) || 0;
+            const factor = outputQty > 0 && qty > 0 ? (qty / outputQty) : 1;
+
+            const rawList = (cachedFormData && Array.isArray(cachedFormData.rawMaterials)) ? cachedFormData.rawMaterials : [];
+            return formula.ingredients.map(ing => {
+                const itemId = ing.itemId != null ? ing.itemId : ing.id;
+                const matched = rawList.find(r => String(r.id || r.itemId || r.name) === String(itemId));
+                const baseQty = parseFloat(ing.quantity || ing.qty || 0) || 0;
+                return {
+                    itemId: itemId,
+                    id: itemId,
+                    name: (matched && (matched.name || matched.itemName)) || ing.name || ing.itemName || String(itemId || ''),
+                    category: 'rawMaterials',
+                    quantity: Math.round((baseQty * factor) * 1000) / 1000,
+                    unit: (matched && matched.unit) || ing.unit || ''
+                };
+            }).filter(x => x.itemId != null && (parseFloat(x.quantity) || 0) > 0);
+        }
+
+        // Show confirmation dialog for proceeding without packing details
+        function showSkipPackagingConfirmDialog() {
+            return new Promise((resolve) => {
+                console.log('Opening packing confirmation dialog...');
+                
+                const dialogOverlay = document.createElement('div');
+                dialogOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+                
+                const content = document.createElement('div');
+                content.style.cssText = 'background-color:white;border-radius:0.5rem;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);max-width:28rem;width:90%;padding:1.5rem;';
+                content.innerHTML = `
+                    <div style="margin-bottom:1rem;">
+                        <h3 style="font-size:1.125rem;font-weight:700;color:#1f2937;">⚠️ Confirm Submission</h3>
+                        <p style="color:#4b5563;margin-top:0.75rem;">Are you sure you want to continue <strong>without packing details</strong>?</p>
+                        <p style="font-size:0.875rem;color:#6b7280;margin-top:0.5rem;">Store staff will not have packaging instructions for this production order.</p>
+                    </div>
+                    <div style="display:flex;gap:0.75rem;margin-top:1.5rem;">
+                        <button id="dlg-cancel-packing" style="flex:1;padding:0.5rem 1rem;background-color:#d1d5db;color:#1f2937;border-radius:0.5rem;font-weight:600;border:none;cursor:pointer;transition:background-color 0.2s;">
+                            No, Add Packing
+                        </button>
+                        <button id="dlg-confirm-packing" style="flex:1;padding:0.5rem 1rem;background-color:#ef4444;color:white;border-radius:0.5rem;font-weight:600;border:none;cursor:pointer;transition:background-color 0.2s;">
+                            Yes, Skip Packing
+                        </button>
+                    </div>
+                `;
+                
+                dialogOverlay.appendChild(content);
+                document.body.appendChild(dialogOverlay);
+                console.log('Dialog added to DOM');
+                
+                // Add event listeners after dialog is in DOM
+                const cancelBtn = document.getElementById('dlg-cancel-packing');
+                const confirmBtn = document.getElementById('dlg-confirm-packing');
+                
+                console.log('Cancel button:', cancelBtn, 'Confirm button:', confirmBtn);
+                
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', function() {
+                        console.log('Cancel packing clicked');
+                        dialogOverlay.remove();
+                        resolve(false);
+                    });
+                    cancelBtn.addEventListener('mouseover', function() { this.style.backgroundColor = '#9ca3af'; });
+                    cancelBtn.addEventListener('mouseout', function() { this.style.backgroundColor = '#d1d5db'; });
+                }
+                
+                if (confirmBtn) {
+                    confirmBtn.addEventListener('click', function() {
+                        console.log('Confirm to skip packing clicked');
+                        dialogOverlay.remove();
+                        resolve(true);
+                    });
+                    confirmBtn.addEventListener('mouseover', function() { this.style.backgroundColor = '#dc2626'; });
+                    confirmBtn.addEventListener('mouseout', function() { this.style.backgroundColor = '#ef4444'; });
+                }
+            });
         }
 
         async function submitProductionRequest(event) {
             event.preventDefault();
-            const btn = event.submitter || event.target.querySelector('button[type="submit"]');
+            
+            // Use wizard submit button as the spinner target (it's what user sees on step 4)
+            console.log('▶ submitProductionRequest called');
+            const btn = document.getElementById('wizard-submit-btn') || event.submitter || event.target.querySelector('button[type="submit"]');
             if (btn) { btn.disabled = true; btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>Submitting...'; }
+
+            const productSelect = document.getElementById('productSelect');
+            const selectedProductOption = productSelect ? productSelect.options[productSelect.selectedIndex] : null;
+            const packageTypeSelect = document.getElementById('prodPackageType');
+            const packageTypeRaw = packageTypeSelect ? packageTypeSelect.value : '';
+            const packageTypeCustom = (document.getElementById('prodPackageTypeCustom') || {}).value || '';
+            const hasMultiPack = Object.values(window.selectedPackSizes || {}).some(qty => qty > 0);
+            const multiPackSummary = Object.entries(window.selectedPackSizes || {})
+                .filter(([_, qty]) => qty > 0)
+                .map(([size, qty]) => `${qty}${((document.getElementById('prodUnit') || {}).value || 'L')} as ${size}`)
+                .join(', ');
+            let packageType = hasMultiPack
+                ? `Multi Pack: ${multiPackSummary}`
+                : (packageTypeRaw === 'custom' ? packageTypeCustom.trim() : packageTypeRaw);
+            const labelMode = ((document.getElementById('prodLabelMode') || {}).value || 'normal').toLowerCase();
+
+            if (!packageType) {
+                console.log('▶ packageType empty; asking confirmation to continue without package type');
+                if (btn) { btn.disabled = false; btn.innerText = 'Submit for Approval'; }
+                const proceedWithoutPackageType = confirm('⚠️ PACKAGE TYPE NOT SELECTED\n\nNo package type has been selected.\n\nDo you want to continue and submit anyway?\n\n[OK] = Continue without package type\n[Cancel] = Go back and select package type');
+                console.log('▶ packageType confirm result:', proceedWithoutPackageType);
+                if (!proceedWithoutPackageType) return;
+                packageType = 'Not specified';
+                if (btn) { btn.disabled = true; btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>Submitting...'; }
+            }
+
+            if (hasMultiPack && typeof validateSplitPackDetailsBeforeProceed === 'function' && !validateSplitPackDetailsBeforeProceed()) {
+                if (btn) { btn.disabled = false; btn.innerText = 'Submit for Approval'; }
+                return;
+            }
+
+            // Packing confirmation - only reached after all other validations pass
+            const packingJson = getProductionPackingLabelsJson('prodPackingRows');
+            if (!packingJson || packingJson.length === 0) {
+                console.log('▶ packingJson empty - showing confirm');
+                if (btn) { btn.disabled = false; btn.innerText = 'Submit for Approval'; }
+                const ok = confirm('⚠️ PACKAGING DETAILS REQUIRED\n\nNo packing items have been added.\n\nAre you sure you want to submit WITHOUT packing details?\n\nStore staff will NOT have packaging instructions.\n\n[OK] = Skip and Submit\n[Cancel] = Go back and add packing');
+                console.log('▶ confirm result:', ok);
+                if (!ok) return;
+                if (btn) { btn.disabled = true; btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>Submitting...'; }
+            }
+
+            const baseRemarks = (document.getElementById('prodRemarks').value || '').trim();
+            const packagingIntentLine = `Packaging Intent: ${packageType} | Label: ${labelMode === 'white' ? 'White Label' : 'Normal Label'}`;
+            const mergedRemarks = baseRemarks ? `${baseRemarks}\n${packagingIntentLine}` : packagingIntentLine;
 
             const requestData = {
                 action: 'create_request',
@@ -1958,13 +3145,39 @@
                 unit: document.getElementById('prodUnit').value,
                 purpose: document.getElementById('prodPurpose').value,
                 targetDate: document.getElementById('prodTargetDate').value,
-                remarks: document.getElementById('prodRemarks').value,
+                remarks: mergedRemarks,
+                packageType: packageType,
+                labelMode: labelMode,
+                formulaId: selectedProductOption && selectedProductOption.dataset.formulaId ? selectedProductOption.dataset.formulaId : '',
                 idempotency_key: (currentUser.email || '') + '_' + Math.floor(Date.now() / 5000)
             };
-            const packingJson = getProductionPackingLabelsJson('prodPackingRows');
+
+            const formulaIngredients = buildProductionFormulaIngredients(requestData.productName, requestData.quantity);
+            if (formulaIngredients.length) {
+                requestData.ingredients = formulaIngredients;
+            }
+
+            // Add multi-pack-size data if available
+            if (hasMultiPack) {
+                requestData.selectedPackSizes = window.selectedPackSizes;
+                requestData.quantityPlanned = parseFloat(document.getElementById('prodQuantity').value) || 0;
+                const overrideKeys = Object.keys(window.batchPackDetailsOverrides || {}).filter(function (size) {
+                    const rows = window.batchPackDetailsOverrides[size] || [];
+                    return rows.length > 0;
+                });
+                if (overrideKeys.length) {
+                    const batchDetails = {};
+                    overrideKeys.forEach(function (size) {
+                        batchDetails[size] = window.batchPackDetailsOverrides[size];
+                    });
+                    requestData.batchPackDetails = JSON.stringify(batchDetails);
+                }
+            }
+            
             const labelsJson = getProductionPackingLabelsJson('prodLabelsRows');
-            if (packingJson.length) requestData.packingJson = JSON.stringify(packingJson);
-            if (labelsJson.length) requestData.labelsJson = JSON.stringify(labelsJson);
+            
+            if (packingJson.length) requestData.packing = packingJson;
+            if (labelsJson.length) requestData.labels = labelsJson;
 
             showToast('Submitting request...', 'info');
 
@@ -1984,7 +3197,7 @@
                 console.error(error);
                 showToast(CRITICAL_ACTION_RETRY_MSG, 'warning');
             } finally {
-                if (btn) { btn.disabled = false; btn.innerText = 'Submit Request'; }
+                if (btn) { btn.disabled = false; btn.innerText = 'Submit for Approval'; }
             }
         }
 
@@ -2247,6 +3460,9 @@
             if (s.includes('MANUFACTURING') || s.includes('WIP')) return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             if (s.includes('DISPATCH')) return 'bg-pink-100 text-pink-700 border-pink-200';
             if (s.includes('RECORDING')) return 'bg-green-100 text-green-700 border-green-200';
+            if (s.includes('REJECTED')) return 'bg-red-100 text-red-600 border-red-200';
+            if (s.includes('ON HOLD') || s.includes('HOLD PLAN')) return 'bg-orange-100 text-orange-600 border-orange-200';
+            if (s.includes('CANCELLED')) return 'bg-gray-200 text-gray-500 border-gray-300';
             return 'bg-gray-100 text-gray-500 border-gray-200';
         }
 
@@ -2326,9 +3542,10 @@
 
             container.appendChild(toast);
 
+            const toastDuration = type === 'error' ? 5000 : type === 'warning' ? 4000 : type === 'success' ? 3000 : 2500;
             setTimeout(() => {
                 toast.remove();
-            }, 3000);
+            }, toastDuration);
         }
 
         // ==========================================
@@ -2722,8 +3939,8 @@
 
                 if (data.requests && data.requests.length > 0) {
                     data.requests.sort(function (a, b) {
-                        var ta = a.createdDate || a.createdAt || a.id || '';
-                        var tb = b.createdDate || b.createdAt || b.id || '';
+                        var ta = a.date || a.createdDate || a.createdAt || a.id || '';
+                        var tb = b.date || b.createdDate || b.createdAt || b.id || '';
                         return ta > tb ? -1 : ta < tb ? 1 : 0;
                     });
                     const html = data.requests.map(req => {
@@ -3409,6 +4626,7 @@
             const userRole = normalizeRole(currentUser.role);
             const stage = (req.currentStage || '').toUpperCase();
             const isResearchReq = ((req.type || '') + '').toLowerCase().indexOf('research') >= 0;
+            const isDispatchTabContext = (currentViewId === 'request-dispatch' || currentViewId === 'dispatch-from-stock');
 
             console.log(`[ActionButtons] Role: ${userRole}, Stage: ${stage}, Status: ${req.status}`);
 
@@ -3426,11 +4644,11 @@
                 actionBtns = `
                     <div class="grid grid-cols-2 gap-2 w-full">
                         <button onclick="handleApprovalAction(event, '${req.id}', 'approve')" class="col-span-2 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">${approveLabel}</button>
-                        <button onclick="handleApprovalAction(event, '${req.id}', 'approve_partial')" class="bg-indigo-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-indigo-600 transition-all">📦 Partial Issue</button>
-                        <button onclick="handleApprovalAction(event, '${req.id}', 'hold')" class="bg-orange-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">⏸️ Hold</button>
-                        <button onclick="handleApprovalAction(event, '${req.id}', 'hold_plan')" class="bg-amber-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-amber-600 transition-all">📋 Hold Plan</button>
+                        <button onclick="handleApprovalAction(event, '${req.id}', 'approve_partial')" title="Approves the request; store will issue available materials (partial quantities if stock is short)" class="bg-indigo-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-indigo-600 transition-all">📦 Partial Issue</button>
+                        <button onclick="handleApprovalAction(event, '${req.id}', 'hold')" title="Temporarily pause this request" class="bg-orange-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-orange-600 transition-all">⏸️ Hold</button>
+                        <button onclick="handleApprovalAction(event, '${req.id}', 'hold_plan')" title="Hold this request to schedule or plan for a future batch" class="bg-amber-500 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-amber-600 transition-all">📋 Hold Plan</button>
                         <button onclick="handleApprovalAction(event, '${req.id}', 'reject')" class="bg-red-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-red-700 transition-all">❌ Reject</button>
-                        <button onclick="deleteRequestPermanent(event, '${req.id}')" class="col-span-2 bg-gray-100 text-red-500 font-black py-2 rounded-xl uppercase text-[9px] hover:bg-red-50 hover:text-red-700 transition-all border border-gray-200 mt-1">🗑️ Delete Request Permanently</button>
+                        <button onclick="deleteRequestPermanent(event, '${req.id}')" title="Permanently delete this request and release any linked material reservations" class="col-span-2 bg-gray-100 text-red-500 font-black py-2 rounded-xl uppercase text-[9px] hover:bg-red-50 hover:text-red-700 transition-all border border-gray-200 mt-1">🗑️ Delete Request Permanently</button>
                     </div>
                 `;
             } else if (userRole === 'Employee' && req.status === 'APPROVED' && stage === 'AWAITING EMPLOYEE CONFIRMATION') {
@@ -3479,10 +4697,10 @@
                 const fullIssueDisabled = stockShort ? ' disabled title="Use Issue Partial when items are short, or add stock in Main Inventory first."' : '';
                 const fullIssueClass = stockShort ? 'flex-1 bg-blue-400 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg opacity-60 cursor-not-allowed' : 'flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-blue-700 transition-all';
                 const maxQty = parseFloat(req.requestedQty || req.quantity || 0) || 0;
-                    actionBtns = `
+                actionBtns = `
                     <button type="button"${fullIssueDisabled} onclick="openIssueMaterialsWizard('${req.id.replace(/'/g, "\\'")}')" class="${fullIssueClass}">${btnLabel}</button>
                     <button type="button" onclick="openPartialIssueModal()" class="flex-1 bg-indigo-500 text-white font-black py-3 rounded-xl border-b-4 border-indigo-700 uppercase text-[10px] shadow-lg hover:bg-indigo-600 transition-all">📦 Issue Partial</button>
-                    <button type="button" onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQty}, '${(req.unit || '').replace(/'/g, "\\'")}', true)" class="flex-1 bg-teal-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-teal-700 transition-all border-b-4 border-teal-700">📤 Direct Dispatch from Stock</button>
+                    ${isDispatchTabContext ? `<button type="button" onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQty}, '${(req.unit || '').replace(/'/g, "\\'")}', true)" class="flex-1 bg-teal-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-teal-700 transition-all border-b-4 border-teal-700">📤 Direct Dispatch from Stock</button>` : ''}
                 `;
 
                 // Cancellation Button for Requester
@@ -3491,18 +4709,18 @@
                     actionBtns += `<button onclick="cancelRequest(event, '${req.id}')" class="flex-1 bg-gray-100 text-gray-500 font-bold py-3 rounded-xl uppercase text-[10px] hover:bg-red-50 hover:text-red-600 transition-all mt-2">🛑 Cancel Request</button>`;
                 }
             }
-            if ((stage === 'AWAITING MATERIAL ISSUE' || stage === 'PENDING STORE & MANAGER' || (stage && (stage.indexOf('PARTIAL OK') >= 0 || stage.toUpperCase().indexOf('PENDING MANAGER') >= 0))) && ['APPROVED', 'APPROVE_REQUEST'].includes(req.status) && (userRole === 'Manager' || userRole === 'Admin' || (userRole === 'Employee' && (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim())))) {
+            if (isDispatchTabContext && (stage === 'AWAITING MATERIAL ISSUE' || stage === 'PENDING STORE & MANAGER' || (stage && (stage.indexOf('PARTIAL OK') >= 0 || stage.toUpperCase().indexOf('PENDING MANAGER') >= 0))) && ['APPROVED', 'APPROVE_REQUEST'].includes(req.status) && (userRole === 'Manager' || userRole === 'Admin' || (userRole === 'Employee' && (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim()))) && (!actionBtns || actionBtns.indexOf('Direct Dispatch from Stock') < 0)) {
                 const maxQtyDirect = parseFloat(req.requestedQty || req.quantity || 0) || 0;
                 actionBtns = (actionBtns || '') + `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQtyDirect}, '${(req.unit || '').replace(/'/g, "\\'")}', true)" class="flex-1 bg-teal-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-teal-700 transition-all border-b-4 border-teal-700">📤 Direct Dispatch from Stock</button>`;
             }
-            if ((stage === 'AWAITING DISPATCH' || (stage && stage.toUpperCase && stage.toUpperCase().indexOf('DISPATCH') >= 0)) && (userRole === 'Store Incharge' || (userRole === 'Employee' && (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim())))) {
+            if (isDispatchTabContext && (stage === 'AWAITING DISPATCH' || (stage && stage.toUpperCase && stage.toUpperCase().indexOf('DISPATCH') >= 0)) && (userRole === 'Store Incharge' || (userRole === 'Employee' && (currentUser.email.toLowerCase().trim() === (req.requesterEmail || '').toLowerCase().trim())))) {
                 const maxQty = parseFloat(req.requestedQty || req.quantity || 0) || 0;
                 actionBtns = (actionBtns || '') + `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${maxQty}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">🚚 Request Dispatch</button>`;
             }
             if (userRole === 'Manager' || userRole === 'Admin') {
                 if (stage === 'AWAITING PRODUCTION RECORDING') {
                     actionBtns = (actionBtns || '') + `<button onclick="handleStageAction(event, '${req.id}', 'RECORD')" class="flex-1 bg-indigo-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-indigo-700 transition-all">Record Production (WIP)</button>`;
-                } else if (stage === 'AWAITING DISPATCH' && (!actionBtns || actionBtns.indexOf('openRequestDispatchModal') < 0)) {
+                } else if (isDispatchTabContext && stage === 'AWAITING DISPATCH' && (!actionBtns || actionBtns.indexOf('openRequestDispatchModal') < 0)) {
                     actionBtns = (actionBtns || '') + `<button onclick="openRequestDispatchModal('${req.id}', '${(getRequestProductNameDisplay(req) || '').replace(/'/g, "\\'")}', ${parseFloat(req.requestedQty || req.quantity || 0) || 0}, '${(req.unit || '').replace(/'/g, "\\'")}')" class="flex-1 bg-green-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-green-700 transition-all">Request Dispatch</button>`;
                 }
             }
@@ -4205,16 +5423,11 @@
         function renderRequestDispatchView(role) {
             const contentArea = document.getElementById('contentArea');
             const isEmployee = (role || '').toLowerCase().indexOf('employee') >= 0;
-            const desc = 'Request dispatch for produced batches or <strong>Direct Dispatch from Stock</strong> when items already exist in inventory. Submit for Manager approval; once approved, it syncs to Main Inventory.';
+            const desc = 'Request dispatch for produced batches only. Submit for Manager approval; once approved, it syncs to Main Inventory.';
             contentArea.innerHTML = `
                 <div class="fade-in">
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">🚚 Request Dispatch</h2>
                     <p class="text-sm text-gray-500 mb-4">${desc}</p>
-                    <h3 class="text-sm font-bold text-teal-700 uppercase tracking-wider mt-6 mb-2">📤 Direct Dispatch from Stock</h3>
-                    <p class="text-xs text-gray-500 mb-3">Approved requests – items already in stock, no production needed.</p>
-                    <div class="space-y-4" id="requestDispatchDirectList">
-                        <div class="text-center py-8 text-gray-400 text-sm">Loading...</div>
-                    </div>
                     <h3 class="text-sm font-bold text-green-700 uppercase tracking-wider mt-8 mb-2">🚢 Produced Batches</h3>
                     <p class="text-xs text-gray-500 mb-3">Produced batches ready for dispatch.</p>
                     <div class="space-y-4" id="requestDispatchList">
@@ -4222,9 +5435,6 @@
                     </div>
                 </div>
             `;
-            const directParams = { directDispatchOnly: '1' };
-            if (isEmployee && currentUser && currentUser.email) directParams.requesterEmail = currentUser.email;
-            loadStageRequests('PENDING_ISSUE', 'requestDispatchDirectList', false, 'request-dispatch-direct', directParams);
             loadStageRequests('DISPATCH', 'requestDispatchList', false, 'request-dispatch', isEmployee ? { requesterEmail: (currentUser && currentUser.email) || '' } : null);
         }
 
@@ -4363,12 +5573,6 @@
                 custSelect.appendChild(opt);
             }
             showToast('Customer "' + name + '" will be added on dispatch.', 'info');
-        }
-
-        function closeDetails() {
-            const modal = document.getElementById('detailsModal');
-            modal.classList.add('portal-hidden');
-            setTimeout(() => modal.style.display = 'none', 300);
         }
 
         async function submitAddMaterial() {
@@ -4516,54 +5720,6 @@
                 </div>
             `;
             loadMyFormulaRequests();
-        }
-
-        async function submitFormulaRequest(e) {
-            e.preventDefault();
-            const basis = document.getElementById('formulaBasis').value;
-            const details = document.getElementById('formulaDetails').value.trim();
-            if (!details) return showToast('Enter formulation details', 'warning');
-            try {
-                const data = await callBackendPost('submit_formula_request', { email: currentUser.email, name: currentUser.name, formulaBasis: basis, formulaDetails: details }).catch(() => ({}));
-                if (data.result === 'success') {
-                    showToast('Request submitted. Admin/Manager will be notified by email.', 'success');
-                    document.getElementById('formulaDetails').value = '';
-                    loadMyFormulaRequests();
-                } else {
-                    showToast(userFriendlyError(data.error), 'error');
-                }
-            } catch (err) {
-                showToast(CRITICAL_ACTION_RETRY_MSG, 'warning');
-            }
-        }
-
-        async function loadMyFormulaRequests() {
-            const el = document.getElementById('myFormulaRequestsList');
-            if (!el) return;
-            try {
-                const data = await callBackend('get_formula_requests', { email: currentUser.email, role: currentUser.role || 'Employee' }).catch(() => ({}));
-                const list = data.requests || [];
-                list.sort(function (a, b) { var ta = a.createdAt || a.id || ''; var tb = b.createdAt || b.id || ''; return ta > tb ? -1 : ta < tb ? 1 : 0; });
-                if (list.length === 0) {
-                    el.innerHTML = '<p class="text-gray-500 text-sm">No formula requests yet.</p>';
-                    return;
-                }
-                el.innerHTML = list.map(r => `
-                    <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                        <div class="flex justify-between items-start gap-2">
-                            <div>
-                                <span class="font-mono font-bold text-blue-600">${r.id}</span>
-                                <span class="ml-2 px-2 py-0.5 rounded text-xs font-bold ${r.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' : r.status === 'Added' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${r.status}</span>
-                            </div>
-                            <span class="text-xs text-gray-500">${r.formulaBasis || ''}</span>
-                        </div>
-                        <p class="text-sm text-gray-600 mt-2 line-clamp-2">${(r.formulaDetails || '').replace(/</g, '&lt;')}</p>
-                        ${r.resolvedBy ? `<p class="text-xs text-gray-500 mt-2">Resolved by ${r.resolvedBy}${r.notes ? ': ' + r.notes : ''}</p>` : ''}
-                    </div>
-                `).join('');
-            } catch (err) {
-                el.innerHTML = '<p class="text-red-500 text-sm">Failed to load.</p>';
-            }
         }
 
         // ==========================================
@@ -4723,8 +5879,8 @@
 
                 if (data.requests && data.requests.length > 0) {
                     data.requests.sort(function (a, b) {
-                        var ta = a.createdDate || a.createdAt || a.id || '';
-                        var tb = b.createdDate || b.createdAt || b.id || '';
+                        var ta = a.date || a.createdDate || a.createdAt || a.id || '';
+                        var tb = b.date || b.createdDate || b.createdAt || b.id || '';
                         return ta > tb ? -1 : ta < tb ? 1 : 0;
                     });
                     listContainer.innerHTML = data.requests.map(req => {
@@ -4816,7 +5972,7 @@
                     invalidateViewCache(true);
                     showToast(`Request ${displayAction}ed!`, 'success');
                     closeDetails();
-                    if (currentUser.role === 'Manager') loadView('pending-approvals', 'Manager');
+                    if (['Manager','Admin'].indexOf(normalizeRole(currentUser.role)) >= 0) loadView('pending-approvals', 'Manager');
                     else refreshCurrentView();
                 } else {
                     showToast(userFriendlyError(data.error), 'error');
@@ -5139,7 +6295,7 @@
 
         async function deleteRequestPermanent(ev, id) {
             if (typeof id === 'undefined') { id = ev; ev = null; }
-            if (!confirm('⚠️ PERMANENTLY DELETE this request?\n\nRequest: ' + id + '\n\nThis cannot be undone. The request and all its data will be removed.')) return;
+            if (!confirm('⚠️ PERMANENTLY DELETE this request?\n\nRequest: ' + id + '\n\n• The request and all thread notes will be removed.\n• Any active material reservations linked to this request will be released.\n• WIP batches or issued stock are NOT automatically reversed.\n\nThis cannot be undone.')) return;
             const reason = prompt('Reason for deletion (optional):') || '';
             if (ev && ev.target) ev.target.disabled = true;
             showToast('Deleting request...', 'info');
