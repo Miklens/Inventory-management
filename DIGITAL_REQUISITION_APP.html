@@ -23,7 +23,7 @@
     <script>
     /* Inline fallback when firebase-backend.js is not available (e.g. GitHub Pages) */
     if (typeof window.FirebaseBackend === 'undefined') {
-    (function(g){'use strict';var db=null;function fail(e){return{result:'error',error:(e&&e.message)||String(e)};}function ok(d){return Object.assign({result:'success'},d);}async function sha256(s){var b=new TextEncoder().encode(s),h=await crypto.subtle.digest('SHA-256',b),a=Array.from(new Uint8Array(h));return a.map(function(x){return('0'+(x&0xff).toString(16)).slice(-2);}).join('');}async function loginUser(email,password){if(!email||!password)return fail(new Error('Email and password required'));var e=String(email).toLowerCase().trim(),ref=db.collection('Users').doc(e.replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return{result:'error',error:'Invalid login'};var u=snap.data(),st=(u.PasswordHash||'').trim();if(!st)return{result:'error',error:'Invalid login'};var hashed=await sha256(String(password)+e);if(st!==hashed&&(/^[a-f0-9]{64}$/i.test(st)!==false||st!==String(password).trim()))return{result:'error',error:'Invalid login'};return ok({user:{email:u.Email||e,name:u.Name||'',role:u.Role||'',department:u.Department||''}});}async function getDb(){var snap=await db.collection('Database').doc('latest').get();if(!snap.exists)return{status:'success',result:'success',data:null};var d=snap.data(),p=(d&&d.data)?d.data:d,v=(d&&d.latestId)?d.latestId:null;return{status:'success',result:'success',data:p,version:v};}async function saveInventory(payload){var s=(payload&&payload.data)?JSON.stringify(payload):(typeof payload==='string'?payload:JSON.stringify(payload));try{var parsed=typeof s==='string'?JSON.parse(s):s;}catch(e){return fail(e);}var dataObj=(parsed&&parsed.data&&parsed.data.inventory)?parsed.data:parsed;await db.collection('Database').doc('latest').set({data:dataObj||parsed,latestId:Date.now().toString(),exportedAt:new Date().toISOString()});return{status:'success'};}async function getCollectionArray(name){var snap=await db.collection(name).get(),out=[];snap.forEach(function(d){if(d.id==='_empty'||d.id==='latest')return;out.push(Object.assign({_id:d.id},d.data()));});return out;}function safeJson(v,def){if(v==null||v==='')return def;if(Array.isArray(v))return v;if(typeof v==='object')return v;try{return JSON.parse(String(v));}catch(e){return def;}}function rowToRequest(d,light){var r=(d&&d.data)?d.data:d,id=r.RequestID||r.id||d.id,row={id:id,type:r.Type||r.type||'',status:r.Status||r.status||'',requesterName:r.EmployeeName||r.requesterName||'',requesterEmail:r.EmployeeEm||r.requesterEmail||'',productName:r.ProductName||r.productName||'',quantity:r.RequestedQty!=null?r.RequestedQty:r.quantity,unit:r.Unit||r.unit||'',remarks:r.Notes||r.remarks||'',date:r.CreatedDate||r.date,stage:r.CurrentStage||r.stage,currentStage:r.CurrentStage||r.stage};if(r.PartialIssuedQty!=null)row.partialIssuedQty=r.PartialIssuedQty;if(!light){row.ingredients=safeJson(r.Formulaltems||r.ingredients,[]);row.packing=safeJson(r.Additionalltems||r.packing,[]);row.labels=safeJson(r.Labels||r.labels,[]);row.additionalItems=safeJson(r.AdditionalItems||r.additionalItems,[]);row.corrections=safeJson(r.Corrections||r.corrections,[]);}return row;}async function getRequestsByStage(params){var stage=(params.stage||'').toUpperCase(),limit=parseInt(params.limit,10)||20,page=parseInt(params.page,10)||1,skip=(page-1)*limit,light=params.light==='1'||params.light===true,all=await getCollectionArray('Requisitions_V2');function match(r,st){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||r.stage||'').toUpperCase();if(st==='ALL')return true;if(st==='PENDING_ISSUE'){if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||cur.indexOf('PENDING MANAGER APPROVAL')>=0)return true;if((status==='APPROVED'||status==='APPROVE_REQUEST')&&(cur.indexOf('AWAITING')>=0||cur.indexOf('MATERIAL ISSUE')>=0))return true;if(status==='PARTIALLY_ISSUED')return true;}if(st==='WIP'&&(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur.indexOf('MATERIAL ISSUED')>=0||cur==='PAUSED'))return true;if(st==='DISPATCH'&&(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED'))return true;if(st==='PENDING_RECORD'&&(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0||cur.indexOf('MATERIAL ISSUED')>=0))return true;if(st==='PARTIAL_ISSUE'&&status==='PARTIALLY_ISSUED')return true;if(st==='PENDING_APPROVALS'){if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))return true;if(status==='ISSUED_PENDING_APPROVAL')return true;return false;}return false;}var filtered=stage==='ALL'?all:all.filter(function(r){return match(r,stage);}),total=filtered.length,pageList=filtered.slice(skip,skip+limit),requests=pageList.map(function(d){return rowToRequest(d,light);});return ok({requests:requests,totalMatches:total,page:page});}async function getAllRequests(p){return getRequestsByStage({stage:'ALL',limit:p.limit||500,light:p.light});}async function getRequestDetails(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var r=snap.data(),tSnap=await db.collection('RequestThreads').where('RequestID','==',id).get(),threads=[];tSnap.forEach(function(t){threads.push(t.data());});threads.sort(function(a,b){return(new Date(a.Timestamp||0)).getTime()-(new Date(b.Timestamp||0)).getTime();});var req={id:r.RequestID||id,type:r.Type,status:r.Status,requesterEmail:r.EmployeeEm,requesterName:r.EmployeeName,productName:r.ProductName,quantity:r.RequestedQty,unit:r.Unit,ingredients:safeJson(r.Formulaltems,[]),packing:safeJson(r.Additionalltems,[]),labels:safeJson(r.Labels,[]),additionalItems:safeJson(r.AdditionalItems,[]),corrections:safeJson(r.Corrections,[]),notes:r.Notes,date:r.CreatedDate,currentStage:r.CurrentStage,managerEmail:r.ManagerEmail,batchId:r.BatchID,partialIssuedQty:r.PartialIssuedQty,thread:threads};return ok({request:req});}function buildFormDataFromInventory(inv){if(!inv)return{products:[],materials:[],raw:[],pack:[],labels:[]};var toItem=function(i){return{id:i.id||i.name,name:i.name||i.itemName||String(i.id||''),unit:i.unit||'Units'};};var raw=(inv.rawMaterials||[]).map(toItem);var pack=(inv.packingMaterials||[]).map(toItem);var lbl=(inv.labels||[]).map(toItem);var prods=(inv.finishedGoods||inv.products||[]).map(toItem);var materials=[].concat(raw.map(function(r){return Object.assign({},r,{category:'raw'});})).concat(pack.map(function(p){return Object.assign({},p,{category:'packing'});})).concat(lbl.map(function(l){return Object.assign({},l,{category:'labels'});}));return{products:prods,materials:materials,raw:raw,pack:pack,labels:lbl};}async function getFormData(){var products=[],materials=[],raw=[],pack=[],labels=[],managers=[];var fcSnap=await db.collection('FormCache').doc('latest').get();if(fcSnap.exists){var fc=fcSnap.data();products=fc.products||[];materials=fc.materials||[];raw=fc.rawMaterials||[];pack=fc.packingMaterials||[];labels=fc.labels||[];}if(products.length===0&&materials.length===0){var formCol=await db.collection('FormCache').limit(10).get();formCol.forEach(function(d){if(products.length>0&&materials.length>0)return;if(d.id==='_empty'||d.id==='latest')return;var fc2=d.data();var p=fc2.products||[];var m=fc2.materials||[];if(p.length||m.length){products=p;materials=m;raw=fc2.rawMaterials||[];pack=fc2.packingMaterials||[];labels=fc2.labels||[];}});}if(products.length===0&&materials.length===0){var dbSnap=await db.collection('Database').doc('latest').get();if(dbSnap.exists){var d=dbSnap.data();var payload=(d&&d.data)?d.data:d;var inv=(payload&&payload.inventory)?payload.inventory:payload;var built=buildFormDataFromInventory(inv);products=built.products;materials=built.materials;raw=built.raw;pack=built.pack;labels=built.labels;}}var dataSnap=await db.collection('Data').doc('latest').get(),employees=[],departments=[];if(dataSnap.exists){var dd=dataSnap.data();employees=dd.Employees||dd.employees||[];departments=dd.Departments||dd.departments||[];}var uSnap=await db.collection('Users').get();uSnap.forEach(function(d){var u=d.data();if(!u.Role)return;if(String(u.Role).toLowerCase().indexOf('manager')>=0||String(u.Role).toLowerCase().indexOf('admin')>=0)managers.push({name:u.Name,email:u.Email});});return ok({products:products,materials:materials,rawMaterials:raw,packingMaterials:pack,labels:labels,managers:managers,employees:employees,departments:departments,approvers:managers.map(function(m){return m.name;})});}async function getLists(){var fd=await getFormData();if(fd.result!=='success')return fd;return ok({data:{products:fd.products,materials:fd.materials,rawMaterials:fd.rawMaterials,packingMaterials:fd.packingMaterials,labels:fd.labels,employees:fd.employees,departments:fd.departments,approvers:fd.approvers}});}async function getStageCounts(){var all=await getCollectionArray('Requisitions_V2'),counts={PENDING_ISSUE:0,WIP:0,DISPATCH:0,PENDING_RECORD:0,PENDING_APPROVALS:0,PARTIAL_ISSUE:0,PENDING_DISPATCH_APPROVALS:0,FORMULA_REQUESTS:0};all.forEach(function(r){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||'').toUpperCase();if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))counts.PENDING_APPROVALS++;if(status==='ISSUED_PENDING_APPROVAL')counts.PENDING_APPROVALS++;if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||(status==='APPROVED'&&cur.indexOf('AWAITING')>=0)||status==='PARTIALLY_ISSUED')counts.PENDING_ISSUE++;if(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur==='PAUSED')counts.WIP++;if(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED')counts.DISPATCH++;if(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0)counts.PENDING_RECORD++;if(status==='PARTIALLY_ISSUED')counts.PARTIAL_ISSUE++;});var dSnap=await db.collection('RequisitionDispatches').get();dSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.PENDING_DISPATCH_APPROVALS++;});var fSnap=await db.collection('FormulaRequests').get();fSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.FORMULA_REQUESTS++;});return ok({counts:counts});}async function submitRequest(p){var newId='REQ-'+Date.now(),ref=db.collection('Requisitions_V2').doc(newId),payload={RequestID:newId,Type:p.type||'Production',Status:'SUBMITTED',EmployeeEm:p.requesterEmail||p.employeeEmail||'',EmployeeName:p.requesterName||p.employeeName||'',ProductName:p.productName||'',RequestedQty:p.requestedQty!=null?p.requestedQty:p.quantity,Formulaltems:p.ingredients?JSON.stringify(p.ingredients):'[]',Additionalltems:p.packing?JSON.stringify(p.packing):'[]',ManagerEmail:p.managerEmail||'',CreatedDate:new Date().toISOString(),Unit:p.unit||'',Labels:p.labels?JSON.stringify(p.labels):'[]',Notes:p.notes||p.remarks||'',CurrentStage:'Pending Manager Approval',AdditionalItems:p.additionalItems?JSON.stringify(p.additionalItems):'[]',Corrections:'[]',BatchID:'',PartialIssuedQty:0};await ref.set(payload);return ok({requestId:newId});}async function updateRequestStage(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var up={};if(p.stageAction==='PARTIAL_ISSUE'&&p.partialQty!=null)up.PartialIssuedQty=parseFloat(p.partialQty);if(p.stage)up.CurrentStage=p.stage;if(p.status)up.Status=p.status;if(Object.keys(up).length)await ref.update(up);return ok({});}async function addThreadNote(p){if(!p.id)return fail(new Error('No id'));await db.collection('RequestThreads').add({RequestID:p.id,Timestamp:new Date().toISOString(),Actor:p.role||'User',Action:'NOTE',User:p.user||'',Remarks:p.note||''});return ok({});}async function addMaterialRequest(p){if(!p.id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(p.id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var add=safeJson(snap.data().AdditionalItems,[]);if(!Array.isArray(add))add=[];add.push({category:p.category,itemName:p.itemName,quantity:parseFloat(p.quantity)||0});await ref.update({AdditionalItems:JSON.stringify(add)});return ok({});}async function actionRequest(p,action){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var status=action==='APPROVED'?'APPROVED':action==='REJECTED'?'REJECTED':action==='ON_HOLD'?'ON_HOLD':'ON_HOLD',stage=action==='APPROVED'?'Awaiting Material Issue':action==='REJECTED'?'Rejected':'On Hold';await ref.update({Status:status,CurrentStage:stage});return ok({});}async function getMyRequests(p){var email=(p.email||'').toLowerCase().trim(),all=await getCollectionArray('Requisitions_V2'),mine=all.filter(function(r){return(r.EmployeeEm||r.requesterEmail||'').toLowerCase()===email;});return ok({requests:mine.map(function(d){return rowToRequest(d,p.light==='1'||p.light===true);})});}async function getStockAdj(p){var all=await getCollectionArray('StockAdjustmentRequests'),list=(p.status||'').toLowerCase()?all.filter(function(r){return(r.Status||'').toLowerCase()===p.status;}):all;return ok({requests:list});}async function markStockDone(p){if(!p.requestId)return fail(new Error('No requestId'));await db.collection('StockAdjustmentRequests').doc(String(p.requestId).replace(/\//g,'_')).update({Status:'Done',DoneBy:p.doneBy||'',DoneAt:new Date().toISOString()});return ok({});}async function getDispApprovals(){var all=await getCollectionArray('RequisitionDispatches');return ok({data:all.filter(function(d){return(d.Status||'').toLowerCase()==='pending';})});}async function getDispatchesForReq(p){var snap=await db.collection('RequisitionDispatches').where('RequestID','==',p.requestId).get(),list=[];snap.forEach(function(d){list.push(d.data());});return ok({dispatches:list});}var handlers={test_connection:async function(){return ok({status:'Online'});},test:async function(){return ok({status:'Online'});},login:loginUser,get_db:getDb,save_inventory:async function(p){var pl=p.data;if(typeof pl==='string')try{pl=JSON.parse(pl);}catch(e){return fail(e);}return saveInventory(pl);},get_form_data:getFormData,get_form_products:async function(){var fd=await getFormData();return fd.result==='success'?ok({products:fd.products}):fd;},get_lists:getLists,get_requests_by_stage:getRequestsByStage,get_all_requests:getAllRequests,get_request_details:getRequestDetails,get_stage_counts:getStageCounts,get_my_requests:getMyRequests,get_pending_approvals:function(p){return getRequestsByStage({stage:'PENDING_APPROVALS',limit:100});},get_material_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_requisition_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_wip_batches:async function(){return ok({batches:await getCollectionArray('WIP_Batches')});},get_pending_production:async function(){var b=await getCollectionArray('WIP_Batches');return ok({pending:b.filter(function(x){return(x.Status||x.status||'').toLowerCase()!=='completed';})});},get_stock_adjustment_requests:getStockAdj,get_pending_dispatch_approvals:getDispApprovals,get_dispatches_for_request:getDispatchesForReq,submit_request:submitRequest,create_request:submitRequest,update_request_stage:updateRequestStage,update_req_stage:updateRequestStage,add_thread_note:addThreadNote,add_material_request:addMaterialRequest,approve_request:function(p){return actionRequest(p,'APPROVED');},reject_request:function(p){return actionRequest(p,'REJECTED');},hold_request:function(p){return actionRequest(p,'ON_HOLD');},approve_partial_request:function(p){return actionRequest(p,'APPROVED');},hold_plan_request:function(p){return actionRequest(p,'ON_HOLD');},mark_stock_adjustment_done:markStockDone,consume_requisition_material:async function(p){if(!p.reqId||!p.itemName)return fail(new Error('reqId and itemName required'));return ok({message:'Recorded (Firebase)',remaining:0});}};async function callBackend(action,params){if(!db)return fail(new Error('Firebase not initialized'));params=params||{};var h=handlers[action];if(!h)return fail(new Error('Invalid action: '+action));try{return await h(params);}catch(e){return fail(e);}}function init(config){if(typeof g.firebase==='undefined'){console.error('Firebase SDK not loaded');return false;}try{g.firebase.initializeApp(config);db=g.firebase.firestore();return true;}catch(e){console.error('Firebase init failed',e);return false;}}g.FirebaseBackend={init:init,callBackend:callBackend};})(typeof window!=='undefined'?window:this);
+    (function(g){'use strict';var db=null;function fail(e){return{result:'error',error:(e&&e.message)||String(e)};}function ok(d){return Object.assign({result:'success'},d);}async function sha256(s){var b=new TextEncoder().encode(s),h=await crypto.subtle.digest('SHA-256',b),a=Array.from(new Uint8Array(h));return a.map(function(x){return('0'+(x&0xff).toString(16)).slice(-2);}).join('');}async function loginUser(email,password){if(!email||!password)return fail(new Error('Email and password required'));var e=String(email).toLowerCase().trim(),ref=db.collection('Users').doc(e.replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return{result:'error',error:'Invalid login'};var u=snap.data(),st=(u.PasswordHash||'').trim();if(!st)return{result:'error',error:'Invalid login'};var hashed=await sha256(String(password)+e);if(st!==hashed&&(/^[a-f0-9]{64}$/i.test(st)!==false||st!==String(password).trim()))return{result:'error',error:'Invalid login'};return ok({user:{email:u.Email||e,name:u.Name||'',role:u.Role||'',department:u.Department||''}});}async function getDb(){var snap=await db.collection('Database').doc('latest').get();if(!snap.exists)return{status:'success',result:'success',data:null};var d=snap.data(),p=(d&&d.data)?d.data:d,v=(d&&d.latestId)?d.latestId:null;return{status:'success',result:'success',data:p,version:v};}async function saveInventory(payload){var s=(payload&&payload.data)?JSON.stringify(payload):(typeof payload==='string'?payload:JSON.stringify(payload));try{var parsed=typeof s==='string'?JSON.parse(s):s;}catch(e){return fail(e);}var dataObj=(parsed&&parsed.data&&parsed.data.inventory)?parsed.data:parsed;await db.collection('Database').doc('latest').set({data:dataObj||parsed,latestId:Date.now().toString(),exportedAt:new Date().toISOString()});return{status:'success'};}async function getCollectionArray(name){var snap=await db.collection(name).get(),out=[];snap.forEach(function(d){if(d.id==='_empty'||d.id==='latest')return;out.push(Object.assign({_id:d.id},d.data()));});return out;}function safeJson(v,def){if(v==null||v==='')return def;if(Array.isArray(v))return v;if(typeof v==='object')return v;try{return JSON.parse(String(v));}catch(e){return def;}}function rowToRequest(d,light){var r=(d&&d.data)?d.data:d,id=r.RequestID||r.id||d.id,row={id:id,type:r.Type||r.type||'',status:r.Status||r.status||'',requesterName:r.EmployeeName||r.requesterName||'',requesterEmail:r.EmployeeEm||r.requesterEmail||'',productName:r.ProductName||r.productName||'',quantity:r.RequestedQty!=null?r.RequestedQty:r.quantity,unit:r.Unit||r.unit||'',remarks:r.Notes||r.remarks||'',date:r.CreatedDate||r.date,stage:r.CurrentStage||r.stage,currentStage:r.CurrentStage||r.stage};if(r.PartialIssuedQty!=null)row.partialIssuedQty=r.PartialIssuedQty;if(!light){row.ingredients=safeJson(r.Formulaltems||r.ingredients,[]);row.packing=safeJson(r.Additionalltems||r.packing,[]);row.labels=safeJson(r.Labels||r.labels,[]);row.additionalItems=safeJson(r.AdditionalItems||r.additionalItems,[]);row.corrections=safeJson(r.Corrections||r.corrections,[]);}return row;}async function getRequestsByStage(params){var stage=(params.stage||'').toUpperCase(),limit=parseInt(params.limit,10)||20,page=parseInt(params.page,10)||1,skip=(page-1)*limit,light=params.light==='1'||params.light===true,all=await getCollectionArray('Requisitions_V2');function match(r,st){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||r.stage||'').toUpperCase();if(st==='ALL')return true;if(st==='PENDING_ISSUE'){if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||cur.indexOf('PENDING MANAGER APPROVAL')>=0)return true;if((status==='APPROVED'||status==='APPROVE_REQUEST')&&(cur.indexOf('AWAITING')>=0||cur.indexOf('MATERIAL ISSUE')>=0))return true;if(status==='PARTIALLY_ISSUED')return true;}if(st==='WIP'&&(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur.indexOf('MATERIAL ISSUED')>=0||cur==='PAUSED'))return true;if(st==='DISPATCH'&&(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED'))return true;if(st==='PENDING_RECORD'&&(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0||cur.indexOf('MATERIAL ISSUED')>=0))return true;if(st==='PARTIAL_ISSUE'&&status==='PARTIALLY_ISSUED')return true;if(st==='PENDING_APPROVALS'){if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))return true;if(status==='ISSUED_PENDING_APPROVAL')return true;return false;}return false;}var filtered=stage==='ALL'?all:all.filter(function(r){return match(r,stage);}),total=filtered.length,pageList=filtered.slice(skip,skip+limit),requests=pageList.map(function(d){return rowToRequest(d,light);});return ok({requests:requests,totalMatches:total,page:page});}async function getAllRequests(p){return getRequestsByStage({stage:'ALL',limit:p.limit||500,light:p.light});}async function getRequestDetails(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var r=snap.data(),tSnap=await db.collection('RequestThreads').where('RequestID','==',id).get(),threads=[];tSnap.forEach(function(t){threads.push(t.data());});threads.sort(function(a,b){return(new Date(a.Timestamp||0)).getTime()-(new Date(b.Timestamp||0)).getTime();});var req={id:r.RequestID||id,type:r.Type,status:r.Status,requesterEmail:r.EmployeeEm,requesterName:r.EmployeeName,productName:r.ProductName,quantity:r.RequestedQty,unit:r.Unit,ingredients:safeJson(r.Formulaltems,[]),packing:safeJson(r.Additionalltems,[]),labels:safeJson(r.Labels,[]),additionalItems:safeJson(r.AdditionalItems,[]),corrections:safeJson(r.Corrections,[]),notes:r.Notes,date:r.CreatedDate,currentStage:r.CurrentStage,managerEmail:r.ManagerEmail,batchId:r.BatchID,partialIssuedQty:r.PartialIssuedQty,thread:threads};return ok({request:req});}function buildFormDataFromInventory(inv){if(!inv)return{products:[],materials:[],raw:[],pack:[],labels:[]};var toItem=function(i){return{id:i.id||i.name,name:i.name||i.itemName||String(i.id||''),unit:i.unit||'Units'};};var raw=(inv.rawMaterials||[]).map(toItem);var pack=(inv.packingMaterials||[]).map(toItem);var lbl=(inv.labels||[]).map(toItem);var prods=(inv.finishedGoods||inv.products||[]).map(toItem);var materials=[].concat(raw.map(function(r){return Object.assign({},r,{category:'raw'});})).concat(pack.map(function(p){return Object.assign({},p,{category:'packing'});})).concat(lbl.map(function(l){return Object.assign({},l,{category:'labels'});}));return{products:prods,materials:materials,raw:raw,pack:pack,labels:lbl};}async function getFormData(){var products=[],materials=[],raw=[],pack=[],labels=[],managers=[];var fcSnap=await db.collection('FormCache').doc('latest').get();if(fcSnap.exists){var fc=fcSnap.data();products=fc.products||[];materials=fc.materials||[];raw=fc.rawMaterials||[];pack=fc.packingMaterials||[];labels=fc.labels||[];}if(products.length===0&&materials.length===0){var formCol=await db.collection('FormCache').limit(10).get();formCol.forEach(function(d){if(products.length>0&&materials.length>0)return;if(d.id==='_empty'||d.id==='latest')return;var fc2=d.data();var p=fc2.products||[];var m=fc2.materials||[];if(p.length||m.length){products=p;materials=m;raw=fc2.rawMaterials||[];pack=fc2.packingMaterials||[];labels=fc2.labels||[];}});}if(products.length===0&&materials.length===0){var dbSnap=await db.collection('Database').doc('latest').get();if(dbSnap.exists){var d=dbSnap.data();var payload=(d&&d.data)?d.data:d;var inv=(payload&&payload.inventory)?payload.inventory:payload;var built=buildFormDataFromInventory(inv);products=built.products;materials=built.materials;raw=built.raw;pack=built.pack;labels=built.labels;}}var dataSnap=await db.collection('Data').doc('latest').get(),employees=[],departments=[];if(dataSnap.exists){var dd=dataSnap.data();employees=dd.Employees||dd.employees||[];departments=dd.Departments||dd.departments||[];}var uSnap=await db.collection('Users').get();uSnap.forEach(function(d){var u=d.data();if(!u.Role)return;if(String(u.Role).toLowerCase().indexOf('manager')>=0||String(u.Role).toLowerCase().indexOf('admin')>=0)managers.push({name:u.Name,email:u.Email});});return ok({products:products,materials:materials,rawMaterials:raw,packingMaterials:pack,labels:labels,managers:managers,employees:employees,departments:departments,approvers:managers.map(function(m){return m.name;})});}async function getLists(){var fd=await getFormData();if(fd.result!=='success')return fd;return ok({data:{products:fd.products,materials:fd.materials,rawMaterials:fd.rawMaterials,packingMaterials:fd.packingMaterials,labels:fd.labels,employees:fd.employees,departments:fd.departments,approvers:fd.approvers}});}async function getStageCounts(){var all=await getCollectionArray('Requisitions_V2'),counts={PENDING_ISSUE:0,WIP:0,DISPATCH:0,PENDING_RECORD:0,PENDING_APPROVALS:0,PARTIAL_ISSUE:0,PENDING_DISPATCH_APPROVALS:0,FORMULA_REQUESTS:0,STOCK_ADJ:0};all.forEach(function(r){var status=(r.Status||r.status||'').toUpperCase(),cur=(r.CurrentStage||r.currentStage||'').toUpperCase();if(cur.indexOf('PENDING MANAGER APPROVAL')>=0&&(status==='SUBMITTED'||status==='PENDING'))counts.PENDING_APPROVALS++;if(status==='ISSUED_PENDING_APPROVAL')counts.PENDING_APPROVALS++;if(cur.indexOf('AWAITING MATERIAL ISSUE')>=0||cur.indexOf('PENDING STORE')>=0||(status==='APPROVED'&&cur.indexOf('AWAITING')>=0)||status==='PARTIALLY_ISSUED')counts.PENDING_ISSUE++;if(cur.indexOf('MANUFACTURING')>=0||cur.indexOf('WIP')>=0||cur==='PAUSED')counts.WIP++;if(cur.indexOf('AWAITING DISPATCH')>=0||status==='PRODUCED')counts.DISPATCH++;if(cur.indexOf('AWAITING PRODUCTION RECORDING')>=0)counts.PENDING_RECORD++;if(status==='PARTIALLY_ISSUED')counts.PARTIAL_ISSUE++;});var dSnap=await db.collection('RequisitionDispatches').get();dSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.PENDING_DISPATCH_APPROVALS++;});var fSnap=await db.collection('FormulaRequests').get();fSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.FORMULA_REQUESTS++;});var sarSnap=await db.collection('StockAdjustmentRequests').get();sarSnap.forEach(function(d){if((d.data().Status||'').toLowerCase()==='pending')counts.STOCK_ADJ++;});return ok({counts:counts});}async function submitRequest(p){var newId='REQ-'+Date.now(),ref=db.collection('Requisitions_V2').doc(newId),payload={RequestID:newId,Type:p.type||'Production',Status:'SUBMITTED',EmployeeEm:p.requesterEmail||p.employeeEmail||'',EmployeeName:p.requesterName||p.employeeName||'',ProductName:p.productName||'',RequestedQty:p.requestedQty!=null?p.requestedQty:p.quantity,Formulaltems:p.ingredients?JSON.stringify(p.ingredients):'[]',Additionalltems:p.packing?JSON.stringify(p.packing):'[]',ManagerEmail:p.managerEmail||'',CreatedDate:new Date().toISOString(),Unit:p.unit||'',Labels:p.labels?JSON.stringify(p.labels):'[]',Notes:p.notes||p.remarks||'',CurrentStage:'Pending Manager Approval',AdditionalItems:p.additionalItems?JSON.stringify(p.additionalItems):'[]',Corrections:'[]',BatchID:'',PartialIssuedQty:0};await ref.set(payload);return ok({requestId:newId});}async function updateRequestStage(p){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var up={};if(p.stageAction==='PARTIAL_ISSUE'&&p.partialQty!=null)up.PartialIssuedQty=parseFloat(p.partialQty);if(p.stage)up.CurrentStage=p.stage;if(p.status)up.Status=p.status;if(Object.keys(up).length)await ref.update(up);return ok({});}async function addThreadNote(p){if(!p.id)return fail(new Error('No id'));await db.collection('RequestThreads').add({RequestID:p.id,Timestamp:new Date().toISOString(),Actor:p.role||'User',Action:'NOTE',User:p.user||'',Remarks:p.note||''});return ok({});}async function addMaterialRequest(p){if(!p.id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(p.id).replace(/\//g,'_')),snap=await ref.get();if(!snap.exists)return fail(new Error('Request not found'));var add=safeJson(snap.data().AdditionalItems,[]);if(!Array.isArray(add))add=[];add.push({category:p.category,itemName:p.itemName,quantity:parseFloat(p.quantity)||0});await ref.update({AdditionalItems:JSON.stringify(add)});return ok({});}async function actionRequest(p,action){var id=p.id;if(!id)return fail(new Error('No id'));var ref=db.collection('Requisitions_V2').doc(String(id).replace(/\//g,'_'));var status=action==='APPROVED'?'APPROVED':action==='REJECTED'?'REJECTED':action==='ON_HOLD'?'ON_HOLD':'ON_HOLD',stage=action==='APPROVED'?'Awaiting Material Issue':action==='REJECTED'?'Rejected':'On Hold';await ref.update({Status:status,CurrentStage:stage});return ok({});}async function getMyRequests(p){var email=(p.email||'').toLowerCase().trim(),all=await getCollectionArray('Requisitions_V2'),mine=all.filter(function(r){return(r.EmployeeEm||r.requesterEmail||'').toLowerCase()===email;});return ok({requests:mine.map(function(d){return rowToRequest(d,p.light==='1'||p.light===true);})});}async function getStockAdj(p){var all=await getCollectionArray('StockAdjustmentRequests'),list=(p.status||'').toLowerCase()?all.filter(function(r){return(r.Status||'').toLowerCase()===p.status;}):all;return ok({requests:list});}async function markStockDone(p){if(!p.requestId)return fail(new Error('No requestId'));await db.collection('StockAdjustmentRequests').doc(String(p.requestId).replace(/\//g,'_')).update({Status:'Done',DoneBy:p.doneBy||'',DoneAt:new Date().toISOString()});return ok({});}async function getDispApprovals(){var all=await getCollectionArray('RequisitionDispatches');return ok({data:all.filter(function(d){return(d.Status||'').toLowerCase()==='pending';})});}async function getDispatchesForReq(p){var snap=await db.collection('RequisitionDispatches').where('RequestID','==',p.requestId).get(),list=[];snap.forEach(function(d){list.push(d.data());});return ok({dispatches:list});}var handlers={test_connection:async function(){return ok({status:'Online'});},test:async function(){return ok({status:'Online'});},login:loginUser,get_db:getDb,save_inventory:async function(p){var pl=p.data;if(typeof pl==='string')try{pl=JSON.parse(pl);}catch(e){return fail(e);}return saveInventory(pl);},get_form_data:getFormData,get_form_products:async function(){var fd=await getFormData();return fd.result==='success'?ok({products:fd.products}):fd;},get_lists:getLists,get_requests_by_stage:getRequestsByStage,get_all_requests:getAllRequests,get_request_details:getRequestDetails,get_stage_counts:getStageCounts,get_my_requests:getMyRequests,get_pending_approvals:function(p){return getRequestsByStage({stage:'PENDING_APPROVALS',limit:100});},get_material_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_requisition_queue:async function(){var q=await getCollectionArray('Material_Requisition_Queue');return ok({queue:q,requests:q});},get_wip_batches:async function(){return ok({batches:await getCollectionArray('WIP_Batches')});},get_pending_production:async function(){var b=await getCollectionArray('WIP_Batches');return ok({pending:b.filter(function(x){return(x.Status||x.status||'').toLowerCase()!=='completed';})});},get_stock_adjustment_requests:getStockAdj,get_pending_dispatch_approvals:getDispApprovals,get_dispatches_for_request:getDispatchesForReq,submit_request:submitRequest,create_request:submitRequest,update_request_stage:updateRequestStage,update_req_stage:updateRequestStage,add_thread_note:addThreadNote,add_material_request:addMaterialRequest,approve_request:function(p){return actionRequest(p,'APPROVED');},reject_request:function(p){return actionRequest(p,'REJECTED');},hold_request:function(p){return actionRequest(p,'ON_HOLD');},approve_partial_request:function(p){return actionRequest(p,'APPROVED');},hold_plan_request:function(p){return actionRequest(p,'ON_HOLD');},approve_stock_adjustment_request:async function(p){var sarId=p.sarId||p.requestId;if(!sarId)return fail(new Error('No sarId'));var sarRef=db.collection('StockAdjustmentRequests').doc(String(sarId).replace(/\//g,'_'));var sarSnap=await sarRef.get();if(!sarSnap.exists)return fail(new Error('Request not found'));var sar=sarSnap.data();var isApprove=(p.action||'approve').toLowerCase()==='approve';await sarRef.update({Status:isApprove?'Approved':'Rejected',ReviewedBy:p.user||'',ReviewedAt:new Date().toISOString()});if(isApprove){var latestRef=db.collection('Database').doc('latest');var dbSnp=await latestRef.get();if(!dbSnp.exists)return fail(new Error('No inventory data'));var dd=dbSnp.data();var pl=(dd.data!=null)?dd.data:dd;var inv=(pl&&pl.inventory)?pl.inventory:pl;var nm=(sar.itemName||'').toString().trim();var iid=(sar.itemId||'').toString().trim();var nq=parseFloat(sar.quantity)||0;var upd=false;var cats=['rawMaterials','packingMaterials','labels'];for(var ci=0;ci<cats.length&&!upd;ci++){var cat=cats[ci];var arr=inv[cat];if(!Array.isArray(arr))continue;for(var ai=0;ai<arr.length;ai++){var it=arr[ai];if(String(it.name||'')===nm||String(it.itemName||'')===nm||(iid&&(String(it.id||'')===iid||String(it.itemId||'')===iid))){var oq=parseFloat(it.quantity||it.qty||0)||0;it.quantity=it.qty=nq;if(!Array.isArray(pl.transactions))pl.transactions=[];pl.transactions.push({id:Date.now().toString()+'-sc',itemName:nm,category:cat,type:'stock-count-adjustment',quantity:nq-oq,previousQty:oq,newQty:nq,date:new Date().toISOString().split('T')[0]+'T00:00:00.000Z',sarId:sarId,approvedBy:p.user||''});upd=true;break;}}}if(!upd)return fail(new Error('Item "'+nm+'" not found in inventory'));var sv=await saveInventory(pl);if(!sv||sv.status!=='success')return fail(new Error((sv&&sv.error)||'Save failed'));}return ok({updated:isApprove,message:isApprove?'Approved & inventory updated':'Rejected'});},mark_stock_adjustment_done:markStockDone,consume_requisition_material:async function(p){if(!p.reqId||!p.itemName)return fail(new Error('reqId and itemName required'));return ok({message:'Recorded (Firebase)',remaining:0});}};async function callBackend(action,params){if(!db)return fail(new Error('Firebase not initialized'));params=params||{};var h=handlers[action];if(!h)return fail(new Error('Invalid action: '+action));try{return await h(params);}catch(e){return fail(e);}}function init(config){if(typeof g.firebase==='undefined'){console.error('Firebase SDK not loaded');return false;}try{g.firebase.initializeApp(config);db=g.firebase.firestore();return true;}catch(e){console.error('Firebase init failed',e);return false;}}g.FirebaseBackend={init:init,callBackend:callBackend};})(typeof window!=='undefined'?window:this);
     }
     </script>
     <style>
@@ -1016,8 +1016,8 @@
                     { id: 'new-request', label: 'New Request', icon: '➕' },
                     { id: 'request-new-formula', label: 'Request New Formula', icon: '🧪' }
                 ],
-                'Manager': [...managerAdminTabs.slice(0, 6), { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' }, ...managerAdminTabs.slice(6)],
-                'Admin': [...managerAdminTabs.slice(0, 6), { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' }, ...managerAdminTabs.slice(6)]
+                'Manager': [...managerAdminTabs.slice(0, 6), { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' }, { id: 'stock-count-requests', label: 'Stock Count', icon: '🔢' }, ...managerAdminTabs.slice(6)],
+                'Admin': [...managerAdminTabs.slice(0, 6), { id: 'dispatch-from-stock', label: 'Dispatch from Stock', icon: '📤' }, { id: 'stock-count-requests', label: 'Stock Count', icon: '🔢' }, ...managerAdminTabs.slice(6)]
             };
 
             const tabs = portals[role] || [];
@@ -1053,7 +1053,8 @@
                     'pending-record': c.PENDING_RECORD || 0,
                     'pending-approvals': c.PENDING_APPROVALS || 0,
                     'formula-requests': c.FORMULA_REQUESTS || 0,
-                    'pending-dispatch-approvals': c.PENDING_DISPATCH_APPROVALS || 0
+                    'pending-dispatch-approvals': c.PENDING_DISPATCH_APPROVALS || 0,
+                    'stock-count-requests': c.STOCK_ADJ || 0
                 };
                 document.querySelectorAll('#navTabs button[data-tab-id]').forEach(btn => {
                     const tabId = btn.dataset.tabId;
@@ -1227,6 +1228,9 @@
                     break;
                 case 'admin-control':
                     renderAdminControl();
+                    break;
+                case 'stock-count-requests':
+                    renderStockCountRequests();
                     break;
                 case 'request-new-formula':
                     renderRequestNewFormula();
@@ -4924,62 +4928,136 @@
             const productName = String(getRequestProductNameDisplay(req) || 'Request').replace(/</g, '&lt;').replace(/"/g, '&quot;');
             const isAlreadyPartial = req.status === 'PARTIALLY_ISSUED' && (req.partialIssuedQty != null || req.partialIssuedQty === 0);
             const alreadyIssued = isAlreadyPartial ? (parseFloat(req.partialIssuedQty) || 0) : 0;
-            const remaining = totalQty - alreadyIssued;
+            const remaining = Math.round((totalQty - alreadyIssued) * 1000) / 1000;
+            const maxQty = isAlreadyPartial ? remaining : totalQty;
+            const halfQty = Math.round(maxQty / 2 * 1000) / 1000;
             const ingredients = [];
             [].concat(req.ingredients || [], req.packing || [], req.labels || [], req.additionalItems || []).forEach(function(ing) {
                 if (!ing || (!ing.name && !ing.itemName)) return;
                 const qty = ing.quantity != null ? ing.quantity : (ing.qty != null ? ing.qty : 0);
                 ingredients.push({ name: String(ing.name || ing.itemName || '').replace(/</g, '&lt;').replace(/"/g, '&quot;'), required: parseFloat(qty) || 0, unit: String(ing.unit || '').replace(/</g, '&lt;') });
             });
-            const tableRows = ingredients.map(function(ing, i) {
-                return `<tr class="border-b border-gray-100"><td class="py-1.5 text-[10px] font-bold text-gray-700">${ing.name}</td><td class="py-1.5 text-[10px] text-gray-500">${ing.required} ${ing.unit}</td><td class="py-1.5 text-[10px] text-indigo-600 font-bold partial-will-deduct" data-required="${ing.required}" data-unit="${ing.unit}">—</td></tr>`;
-            }).join('') || '<tr><td colspan="3" class="py-2 text-[10px] text-gray-400">No formula items</td></tr>';
+            const tableRows = ingredients.map(function(ing) {
+                return `<tr class="border-b border-gray-100">
+                    <td class="py-2 px-2 text-[11px] font-semibold text-gray-700">${ing.name}</td>
+                    <td class="py-2 px-2 text-[11px] text-gray-500 text-right">${ing.required} ${ing.unit}</td>
+                    <td class="py-2 px-2 text-[11px] font-bold text-indigo-600 text-right partial-will-deduct" data-required="${ing.required}" data-unit="${ing.unit}">—</td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="3" class="py-2 text-[10px] text-gray-400 text-center">No formula items</td></tr>';
             const existing = document.getElementById('partialIssueModal');
             if (existing) existing.remove();
             const modal = document.createElement('div');
             modal.id = 'partialIssueModal';
             modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110] overflow-y-auto py-4';
             modal.innerHTML = `
-                <div class="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl mx-4 border-t-4 border-indigo-500 my-4">
-                    <h2 class="text-xl font-bold text-gray-800 mb-1">📦 Issue partial – ${productName}</h2>
-                    <p class="text-xs text-gray-500 mb-2">Target quantity: <strong>${totalQty} ${unit}</strong>${isAlreadyPartial ? '. Already issued: <strong>' + alreadyIssued + ' ' + unit + '</strong>. Enter <strong>additional</strong> quantity to issue now.' : '.'}</p>
-                    <p class="text-[10px] text-gray-600 mb-3">Enter how many <strong>product units</strong> you are issuing now. Ingredients will be deducted proportionally from Main Inventory.</p>
-                    <div class="mb-4">
-                        <label class="block text-xs font-bold text-gray-600 mb-1">Quantity to issue now (product units)</label>
-                        <input type="number" id="partialIssueProductQty" step="any" min="0.01" max="${isAlreadyPartial ? remaining : totalQty}" value="" placeholder="${isAlreadyPartial ? 'e.g. ' + Math.min(1, remaining) : 'e.g. 1'}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-xs font-bold text-gray-600 mb-1">Formula ingredients – required (full) vs will deduct (this time)</label>
-                        <div class="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
-                            <table class="w-full text-left"><thead><tr class="bg-gray-50 border-b"><th class="p-2 text-[9px] font-black text-gray-500 uppercase">Ingredient</th><th class="p-2 text-[9px] font-black text-gray-500 uppercase">Required (full)</th><th class="p-2 text-[9px] font-black text-indigo-600 uppercase">Will deduct (this time)</th></tr></thead><tbody id="partialIssuePreviewBody">${tableRows}</tbody></table>
+                <div class="bg-white rounded-2xl w-full max-w-lg shadow-2xl mx-4 my-4 border-t-4 border-indigo-500 overflow-hidden">
+
+                    <!-- Header -->
+                    <div class="flex items-start justify-between px-6 pt-5 pb-3 border-b border-gray-100">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">📦 Issue Partial – ${productName}</h2>
+                            <p class="text-xs text-gray-500 mt-0.5">Full batch size: <strong>${totalQty} ${unit}</strong></p>
                         </div>
+                        <button onclick="document.getElementById('partialIssueModal').remove()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-4 mt-0.5">×</button>
                     </div>
-                    <div class="flex gap-3 mt-4">
-                        <button type="button" onclick="document.getElementById('partialIssueModal').remove()" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300">Cancel</button>
-                        <button type="button" id="partialIssueSubmitBtn" onclick="submitPartialIssue('${req.id.replace(/'/g, "\\'")}', ${totalQty})" class="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700">Issue partial</button>
+
+                    <div class="px-6 py-4 space-y-4">
+
+                        <!-- Already issued banner -->
+                        ${isAlreadyPartial ? `
+                        <div class="flex items-center gap-4 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-xs">
+                            <div class="text-center"><div class="text-[9px] text-gray-500 uppercase font-bold">Already issued</div><div class="text-base font-black text-indigo-700">${alreadyIssued} ${unit}</div></div>
+                            <div class="text-gray-300 text-xl">|</div>
+                            <div class="text-center"><div class="text-[9px] text-gray-500 uppercase font-bold">Remaining</div><div class="text-base font-black text-emerald-600">${remaining} ${unit}</div></div>
+                            <div class="flex-1 text-[10px] text-indigo-600 font-medium">Enter the additional quantity you want to issue now.</div>
+                        </div>` : `
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-xs text-blue-700">
+                            <strong>What is partial issue?</strong> You are issuing a portion of the full batch. Ingredients will be deducted from inventory proportionally based on the quantity you enter below.
+                        </div>`}
+
+                        <!-- Quantity input -->
+                        <div class="bg-gray-50 rounded-xl p-4">
+                            <label class="block text-xs font-bold text-gray-700 mb-2">
+                                How many <span class="text-indigo-600 font-black">${unit}</span> of <span class="text-indigo-600 font-black">${productName}</span> to issue now?
+                            </label>
+                            <div class="flex items-center gap-3 mb-3">
+                                <input type="number" id="partialIssueProductQty" step="any" min="0.01" max="${maxQty}"
+                                    placeholder="Enter quantity (max ${maxQty})"
+                                    class="flex-1 px-3 py-2.5 border-2 border-indigo-300 rounded-xl text-base font-bold text-center focus:ring-2 focus:ring-indigo-400 focus:border-indigo-500 outline-none">
+                                <span class="text-sm font-black text-gray-600 whitespace-nowrap">${unit}</span>
+                            </div>
+                            <!-- Quick fill buttons -->
+                            <div class="flex gap-2">
+                                <button type="button" onclick="document.getElementById('partialIssueProductQty').value='${maxQty}';updatePartialIssuePreview(true)"
+                                    class="flex-1 py-2 text-[10px] font-black bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-300 hover:bg-emerald-200 leading-tight">
+                                    ${isAlreadyPartial ? 'Issue All Remaining' : 'Full Batch'}<br><span class="text-emerald-600">${maxQty} ${unit}</span>
+                                </button>
+                                ${halfQty > 0 ? `<button type="button" onclick="document.getElementById('partialIssueProductQty').value='${halfQty}';updatePartialIssuePreview(true)"
+                                    class="flex-1 py-2 text-[10px] font-black bg-gray-100 text-gray-700 rounded-lg border border-gray-300 hover:bg-gray-200 leading-tight">
+                                    ${isAlreadyPartial ? 'Issue Half Remaining' : 'Half Batch'}<br><span class="text-gray-500">${halfQty} ${unit}</span>
+                                </button>` : ''}
+                            </div>
+                        </div>
+
+                        <!-- Ingredient deduction preview -->
+                        ${ingredients.length > 0 ? `
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <p class="text-xs font-bold text-gray-600">Ingredients that will be deducted from inventory:</p>
+                                <span id="partialIssueRatioLabel" class="text-[10px] font-bold text-indigo-500"></span>
+                            </div>
+                            <div class="max-h-44 overflow-y-auto border border-gray-200 rounded-xl">
+                                <table class="w-full text-left">
+                                    <thead><tr class="bg-gray-50 border-b sticky top-0 z-10">
+                                        <th class="px-3 py-2 text-[9px] font-black text-gray-500 uppercase">Ingredient</th>
+                                        <th class="px-3 py-2 text-[9px] font-black text-gray-400 uppercase text-right">Full batch</th>
+                                        <th class="px-3 py-2 text-[9px] font-black text-indigo-600 uppercase text-right">Will deduct now ↓</th>
+                                    </tr></thead>
+                                    <tbody id="partialIssuePreviewBody">${tableRows}</tbody>
+                                </table>
+                            </div>
+                            <p class="text-[9px] text-gray-400 mt-1">← Tap a quick-fill button or type quantity to see amounts</p>
+                        </div>` : ''}
+
+                        <!-- Action buttons -->
+                        <div class="flex gap-3 pt-1">
+                            <button type="button" onclick="document.getElementById('partialIssueModal').remove()"
+                                class="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 text-sm">Cancel</button>
+                            <button type="button" id="partialIssueSubmitBtn"
+                                onclick="submitPartialIssue('${req.id.replace(/'/g, "\\'")}', ${totalQty})"
+                                class="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 text-sm">
+                                ✅ Confirm &amp; Issue
+                            </button>
+                        </div>
                     </div>
                 </div>`;
             document.body.appendChild(modal);
             window._partialIssueTotalQty = totalQty;
             const inputEl = document.getElementById('partialIssueProductQty');
             if (inputEl) {
-                inputEl.addEventListener('input', updatePartialIssuePreview);
-                inputEl.addEventListener('change', updatePartialIssuePreview);
+                inputEl.addEventListener('input', function() { updatePartialIssuePreview(false); });
+                inputEl.addEventListener('change', function() { updatePartialIssuePreview(false); });
+                inputEl.focus();
             }
         }
 
-        function updatePartialIssuePreview() {
+        function updatePartialIssuePreview(autoFilled) {
             const totalQty = window._partialIssueTotalQty;
             if (totalQty == null || totalQty <= 0) return;
             const qty = parseFloat(document.getElementById('partialIssueProductQty').value) || 0;
             const ratio = qty / totalQty;
             const tbody = document.getElementById('partialIssuePreviewBody');
+            const ratioLabel = document.getElementById('partialIssueRatioLabel');
+            if (ratioLabel) ratioLabel.textContent = qty > 0 ? Math.round(ratio * 100) + '% of full batch' : '';
+            const btn = document.getElementById('partialIssueSubmitBtn');
+            if (btn) btn.textContent = qty > 0 ? '✅ Issue ' + qty + ' now' : '✅ Confirm & Issue';
             if (!tbody) return;
             tbody.querySelectorAll('tr .partial-will-deduct').forEach(function(td) {
                 const required = parseFloat(td.getAttribute('data-required')) || 0;
                 const unit = td.getAttribute('data-unit') || '';
-                const deduct = (ratio * required);
+                const deduct = ratio * required;
                 td.textContent = deduct > 0 ? (Math.round(deduct * 1000) / 1000) + ' ' + unit : '—';
+                td.style.color = deduct > 0 ? '#4f46e5' : '#9ca3af';
             });
         }
 
@@ -5015,7 +5093,7 @@
                 console.error(err);
                 showToast('Network error. Please try again.', 'error');
             } finally {
-                if (btn) { btn.disabled = false; btn.textContent = 'Issue partial'; }
+                if (btn) { btn.disabled = false; btn.textContent = '✅ Confirm & Issue'; }
             }
         }
 
@@ -5104,7 +5182,7 @@
             }
             if (btn) { btn.disabled = false; btn.textContent = 'Send request(s)'; }
             document.getElementById('requestStockAdjustmentModal').remove();
-            showToast(ok > 0 ? 'Request(s) sent. Main Inventory will add stock as adjustment.' : 'Failed to send. Try again.', ok > 0 ? 'success' : 'error');
+            showToast(ok > 0 ? '✅ Request(s) sent. Manager/Admin notified by email. They will update inventory and you will be notified.' : 'Failed to send. Try again.', ok > 0 ? 'success' : 'error');
             if (ok > 0 && typeof invalidateViewCache === 'function') invalidateViewCache(true);
         }
 
@@ -5610,6 +5688,116 @@
                 </div>
             `;
             loadPendingApprovals();
+        }
+
+        // ==========================================
+        // ADMIN / MANAGER — STOCK COUNT REQUESTS
+        // ==========================================
+        async function renderStockCountRequests() {
+            const contentArea = document.getElementById('contentArea');
+            contentArea.innerHTML = `
+                <div class="fade-in p-6 max-w-4xl mx-auto">
+                    <div class="mb-6">
+                        <h2 class="text-3xl font-black text-gray-800 tracking-tighter">🔢 Stock Count Requests</h2>
+                        <p class="text-gray-500 font-semibold italic">Store incharge reported physical stock — review and approve to auto-update Main Inventory.</p>
+                    </div>
+                    <div id="stockCountList" class="space-y-3">
+                        <div class="text-center py-16"><div class="animate-spin inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div></div>
+                    </div>
+                </div>`;
+            try {
+                const data = await callBackend('get_stock_adjustment_requests', { status: 'pending' });
+                const list = document.getElementById('stockCountList');
+                if (!list) return;
+                const requests = (data.requests || []).sort((a, b) => new Date(b.RequestedAt || 0) - new Date(a.RequestedAt || 0));
+                if (requests.length === 0) {
+                    list.innerHTML = `<div class="text-center py-16 text-gray-400 font-semibold">✅ No pending stock count requests.</div>`;
+                    return;
+                }
+                list.innerHTML = requests.map(function(r) {
+                    const id = r.RequestID || r._id || '';
+                    const itemName = String(r.itemName || '').replace(/</g, '&lt;');
+                    const qty = r.quantity != null ? r.quantity : '?';
+                    const unit = String(r.unit || '').replace(/</g, '&lt;');
+                    const by = String(r.RequestedBy || '').replace(/</g, '&lt;');
+                    const email = String(r.RequestedByEmail || '').replace(/</g, '&lt;');
+                    const reqRef = String(r.requisitionId || '').replace(/</g, '&lt;');
+                    const at = r.RequestedAt ? new Date(r.RequestedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+                    return `
+                    <div class="bg-white rounded-2xl shadow border border-amber-200 border-l-4 border-l-amber-500 p-5" id="sar-card-${id.replace(/[^a-zA-Z0-9]/g, '_')}">
+                        <div class="flex items-start justify-between gap-4 flex-wrap">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                    <span class="text-[9px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded uppercase tracking-wider">Stock Count Request</span>
+                                    <span class="text-[10px] text-gray-400 font-mono">${id}</span>
+                                </div>
+                                <div class="text-lg font-black text-gray-800 mb-0.5">${itemName}</div>
+                                <div class="flex items-center gap-4 flex-wrap text-xs text-gray-600 mt-1">
+                                    <span class="font-black text-emerald-700 text-base">${qty} ${unit}</span>
+                                    <span class="text-gray-400">physical count reported</span>
+                                </div>
+                                <div class="mt-2 text-[11px] text-gray-500 space-y-0.5">
+                                    <div>👤 Requested by <strong>${by}</strong>${email ? ' (' + email + ')' : ''}</div>
+                                    ${reqRef ? `<div>🔗 Related to requisition <strong>${reqRef}</strong></div>` : ''}
+                                    ${at ? `<div>🕐 ${at}</div>` : ''}
+                                </div>
+                            </div>
+                            <div class="flex flex-col gap-2 min-w-[160px]">
+                                <button onclick="reviewStockCountRequest('${id.replace(/'/g, "\\'")}', 'approve')"
+                                    class="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-black text-xs hover:bg-emerald-700 shadow-md transition-all">
+                                    ✅ Approve &amp; Update Inventory
+                                </button>
+                                <button onclick="reviewStockCountRequest('${id.replace(/'/g, "\\'")}', 'reject')"
+                                    class="w-full py-2.5 bg-red-100 text-red-700 rounded-xl font-bold text-xs hover:bg-red-200 border border-red-300 transition-all">
+                                    ✗ Reject
+                                </button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                const list = document.getElementById('stockCountList');
+                if (list) list.innerHTML = `<div class="text-center py-16 text-red-500">Error loading requests. Try again.</div>`;
+            }
+        }
+
+        async function reviewStockCountRequest(sarId, action) {
+            const isApprove = action === 'approve';
+            if (!confirm(isApprove
+                ? 'Approve this stock count? The inventory quantity will be automatically updated to the physical count.'
+                : 'Reject this stock count request? The store incharge will be notified.')) return;
+            const card = document.getElementById('sar-card-' + sarId.replace(/[^a-zA-Z0-9]/g, '_'));
+            const btns = card ? card.querySelectorAll('button') : [];
+            btns.forEach(function(b) { b.disabled = true; b.textContent = 'Processing...'; });
+            try {
+                const data = await callBackendPost('approve_stock_adjustment_request', {
+                    sarId: sarId,
+                    action: action,
+                    user: currentUser.name || currentUser.email || 'Manager'
+                });
+                if (data.result === 'success') {
+                    if (card) card.remove();
+                    showToast(isApprove
+                        ? '✅ Approved! Inventory quantity updated. Store incharge notified by email.'
+                        : '✅ Rejected. Store incharge notified.',
+                        'success');
+                    if (typeof fetchTabCounts === 'function') fetchTabCounts();
+                    if (typeof invalidateViewCache === 'function') invalidateViewCache(true);
+                    // If list is now empty, show empty state
+                    const list = document.getElementById('stockCountList');
+                    if (list && list.children.length === 0) {
+                        list.innerHTML = `<div class="text-center py-16 text-gray-400 font-semibold">✅ No pending stock count requests.</div>`;
+                    }
+                } else {
+                    showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+                    btns.forEach(function(b) { b.disabled = false; });
+                    if (btns[0]) btns[0].textContent = '✅ Approve & Update Inventory';
+                    if (btns[1]) btns[1].textContent = '✗ Reject';
+                }
+            } catch (e) {
+                showToast('Network error. Please try again.', 'error');
+                btns.forEach(function(b) { b.disabled = false; });
+            }
         }
 
         // ==========================================
