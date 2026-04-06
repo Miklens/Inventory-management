@@ -895,14 +895,50 @@
                 <button type="button" onclick="addIngredientInput()" class="text-sm text-blue-600 hover:text-blue-800">+
                     Add Ingredient</button>
 
+                <!-- PACK SIZE MATERIAL REQUIREMENTS SECTION -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
+                    <h4 class="font-bold text-blue-900 mb-3">📦 Materials Required Per Pack Size</h4>
+                    <p class="text-xs text-blue-700 mb-3">Define what packing materials and labels are needed for each pack size (bottles, labels, carton box, tape, etc.)</p>
+                    
+                    <div class="mb-4">
+                        <label class="text-sm font-medium text-gray-700 mb-2 block">Select Pack Size:</label>
+                        <select id="pack-req-size-select" class="w-full p-2 border rounded-md bg-white" onchange="switchPackReqTab(this.value)">
+                            <option value="">-- Select Pack Size --</option>
+                            <option value="100ml">100ml</option>
+                            <option value="250ml">250ml</option>
+                            <option value="500ml">500ml</option>
+                            <option value="1L">1L</option>
+                            <option value="5L">5L</option>
+                            <option value="10L">10L</option>
+                            <option value="250gm">250gm</option>
+                            <option value="500gm">500gm</option>
+                            <option value="1kg">1kg</option>
+                            <option value="5kg">5kg</option>
+                            <option value="Bulk">Bulk Drum/Container</option>
+                        </select>
+                    </div>
+                    
+                    <div id="pack-req-materials-container" class="flex flex-col gap-2 mb-3">
+                        <p class="text-sm text-gray-600">Select a pack size above to add materials</p>
+                    </div>
+                    
+                    <button type="button" onclick="addPackReqMaterial()" class="text-sm text-blue-600 hover:text-blue-800" id="add-pack-req-btn" style="display:none;">
+                        + Add Material for This Pack Size
+                    </button>
+                    
+                    <div id="pack-req-summary" class="mt-3 text-xs text-gray-600 bg-white rounded p-2"></div>
+                </div>
+
                 <div id="packing-container">
-                    <h4 class="font-medium text-gray-800 mt-4">Packing Materials</h4>
+                    <h4 class="font-medium text-gray-800 mt-4">Packing Materials (Generic)</h4>
+                    <p class="text-xs text-gray-500 mb-2">Leave empty if using pack-size specific requirements above</p>
                 </div>
                 <button type="button" onclick="addPackingInput()" class="text-sm text-blue-600 hover:text-blue-800">+
                     Add Packing Material</button>
 
                 <div id="labels-container">
-                    <h4 class="font-medium text-gray-800 mt-4">Labels</h4>
+                    <h4 class="font-medium text-gray-800 mt-4">Labels (Generic)</h4>
+                    <p class="text-xs text-gray-500 mb-2">Leave empty if using pack-size specific requirements above</p>
                 </div>
                 <button type="button" onclick="addLabelInput()" class="text-sm text-blue-600 hover:text-blue-800">+
                     Add Label</button>
@@ -2218,6 +2254,50 @@
                         updateSyncStatus('error', 'Sync Failed');
                     } finally {
                         isSyncing = false;
+                    }
+                }
+
+                async function syncUniversalPackDefaultsOnly() {
+                    if (!useFirebase || !window.FirebaseBackend) {
+                        if (cloudApiUrl) {
+                            updateSyncStatus('pending', 'Universal-only sync requires Firebase mode');
+                        }
+                        return;
+                    }
+
+                    updateSyncStatus('syncing', 'Syncing universal pack defaults...');
+                    try {
+                        var auditUser = '';
+                        try {
+                            var su = sessionStorage.getItem('INVENTORY_USER');
+                            if (su) {
+                                var u = JSON.parse(su);
+                                auditUser = u.email || u.name || '';
+                            }
+                        } catch (e) {}
+
+                        var saveResult = await window.FirebaseBackend.callBackend('save_universal_pack_defaults', {
+                            universalPackDetails: JSON.stringify(appState.universalPackDetails || {}),
+                            baseVersion: appState._serverVersion || '',
+                            user: auditUser
+                        });
+
+                        if (saveResult && (saveResult.code === 'CONFLICT' || (saveResult.result === 'error' && (saveResult.error || '').indexOf('changed by someone else') >= 0))) {
+                            updateSyncStatus('error', 'Conflict – defaults not synced');
+                            if (typeof showAlert === 'function') showAlert('Universal defaults conflict. Refresh and try save again.', 'warning');
+                            return;
+                        }
+                        if (saveResult && saveResult.result === 'error') {
+                            updateSyncStatus('error', saveResult.error || 'Defaults sync failed');
+                            return;
+                        }
+
+                        if (saveResult && saveResult.version) appState._serverVersion = saveResult.version;
+                        updateSyncStatus('success', 'Universal defaults synced');
+                        if (typeof showToast === 'function') showToast('Universal defaults synced to cloud.', 'success');
+                    } catch (error) {
+                        console.error('Universal defaults sync failed', error);
+                        updateSyncStatus('error', 'Defaults sync failed');
                     }
                 }
 
@@ -6262,11 +6342,13 @@
                     <button class="px-4 py-2 text-lg font-semibold border-b-2 tab-button" data-tab="daily">Daily Report</button>
                     <button class="px-4 py-2 text-lg font-semibold border-b-2 tab-button" data-tab="monthly">Monthly Report</button>
                     <button class="px-4 py-2 text-lg font-semibold border-b-2 tab-button" data-tab="item-ledger">Item-wise Ledger</button>
+                    <button class="px-4 py-2 text-lg font-semibold border-b-2 tab-button" data-tab="pack-conversion">Pack Conversions</button>
                     <button class="px-4 py-2 text-lg font-semibold border-b-2 tab-button" data-tab="period-server">Period Report (Full History)</button>
                 </div>
                 <div id="daily-report-tab" class="tab-content"></div>
                 <div id="monthly-report-tab" class="tab-content hidden"></div>
                 <div id="item-ledger-report-tab" class="tab-content hidden"></div>
+                <div id="pack-conversion-report-tab" class="tab-content hidden"></div>
                 <div id="period-server-report-tab" class="tab-content hidden"></div>
             </div>`;
                         document.querySelectorAll('.tab-button').forEach(button => {
@@ -6282,6 +6364,8 @@
                                     renderMonthlyReportContent();
                                 } else if (tabId === 'item-ledger') {
                                     renderItemLedgerReportContent();
+                                } else if (tabId === 'pack-conversion') {
+                                    renderPackConversionReportContent();
                                 } else if (tabId === 'period-server') {
                                     renderPeriodServerReportContent();
                                 }
@@ -6360,6 +6444,138 @@
                         csv += '\nBy Item\nS.No,Item,Qty\n';
                         Object.keys(d.byItem || {}).sort().forEach((i, idx) => { csv += (idx + 1) + ',"' + String(i).replace(/"/g, '""') + '",' + Number(d.byItem[i]).toFixed(3) + '\n'; });
                         downloadFile('period_report_' + d.dateRange.start + '_to_' + d.dateRange.end + '.csv', csv, 'text/csv;charset=utf-8;');
+                    }
+
+                    function renderPackConversionReportContent() {
+                        const container = document.getElementById('pack-conversion-report-tab');
+                        if (!container) return;
+                        const today = getToday();
+                        const startDefault = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+
+                        const collectRows = (startDate, endDate) => {
+                            const addRows = (appState.transactions || []).filter(tx => {
+                                if (!tx || tx.type !== 'production-add') return false;
+                                const subtype = String(tx.subtype || '');
+                                if (subtype !== 'pack-from-bulk' && subtype !== 'multi-pack-bulk') return false;
+                                const d = getLocalDateString(tx.date);
+                                return (!startDate || d >= startDate) && (!endDate || d <= endDate);
+                            }).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+                            return addRows.map((tx, index) => {
+                                const related = (appState.transactions || []).filter(c => c && c.batchNo === tx.batchNo && c.type === 'production-consume' && (String(c.subtype || '').indexOf('pack-from-bulk-') === 0 || String(c.subtype || '') === 'multi-pack-bulk' || String(c.subtype || '') === 'pack-from-bulk-extra'));
+                                const bulkTx = related.find(r => r.subtype === 'pack-from-bulk-bulk' || r.subtype === 'multi-pack-bulk');
+                                const pkgTx = related.find(r => r.subtype === 'pack-from-bulk-package');
+                                const lblTx = related.find(r => r.subtype === 'pack-from-bulk-label');
+                                const extraTxs = related.filter(r => r.subtype === 'pack-from-bulk-extra');
+                                const isWhite = String(tx.notes || '').toLowerCase().indexOf('white label') >= 0;
+                                const convDetails = tx.conversionDetails || {};
+                                const extraDetails = (convDetails.additionalDefaults || []).length
+                                    ? convDetails.additionalDefaults.map(item => `${item.itemName || item.itemId} (${Number(item.quantity || 0).toFixed(3)})`).join(' | ')
+                                    : extraTxs.map(item => `${item.itemName || '-'} (${Number(item.quantity || 0).toFixed(3)})`).join(' | ');
+                                return {
+                                    sno: index + 1,
+                                    date: getLocalDateString(tx.date),
+                                    reference: tx.batchNo || '-',
+                                    variant: tx.itemName || '-',
+                                    outputQty: Number(tx.quantity || 0),
+                                    bulkItem: bulkTx ? (bulkTx.itemName || '-') : (convDetails.sourceBulkName || '-'),
+                                    bulkQty: bulkTx ? Number(bulkTx.quantity || 0) : Number(convDetails.bulkQtyUsed || 0),
+                                    packSize: convDetails.packSize || convDetails.packSizeThisTxn || (convDetails.multiPack ? 'Multi' : '-'),
+                                    defaultSource: convDetails.defaultSource || (convDetails.multiPack ? 'multi-pack' : '-'),
+                                    packageItem: pkgTx ? (pkgTx.itemName || '-') : (convDetails.packageUsed || '-'),
+                                    packageQty: pkgTx ? Number(pkgTx.quantity || 0) : Number(convDetails.packageQtyUsed || 0),
+                                    labelMode: isWhite ? 'White Label' : 'Normal Label',
+                                    labelItem: lblTx ? (lblTx.itemName || '-') : (isWhite ? 'N/A' : (convDetails.labelUsed || '-')),
+                                    labelQty: lblTx ? Number(lblTx.quantity || 0) : Number(convDetails.labelQtyUsed || 0),
+                                    extraDefaults: extraDetails || '-',
+                                    remainingLocation: convDetails.remainingLocation || 'Not recorded',
+                                    notes: tx.notes || ''
+                                };
+                            });
+                        };
+
+                        const render = () => {
+                            const startDate = document.getElementById('pack-report-start') ? document.getElementById('pack-report-start').value : startDefault;
+                            const endDate = document.getElementById('pack-report-end') ? document.getElementById('pack-report-end').value : today;
+                            const rows = collectRows(startDate, endDate);
+                            window._lastPackFromBulkReportData = { startDate, endDate, rows };
+
+                            container.innerHTML = `
+                                <div class="p-4">
+                                    <div class="flex flex-wrap items-end gap-3 mb-4">
+                                        <div><label class="block text-sm font-medium">Start Date</label><input type="date" id="pack-report-start" value="${startDate}" class="p-2 border rounded"></div>
+                                        <div><label class="block text-sm font-medium">End Date</label><input type="date" id="pack-report-end" value="${endDate}" class="p-2 border rounded"></div>
+                                        <button id="pack-report-apply" class="px-3 py-2 bg-blue-600 text-white rounded">Apply</button>
+                                        <button onclick="exportPackFromBulkReportCSV()" class="px-3 py-2 bg-green-600 text-white rounded">Export CSV</button>
+                                    </div>
+                                    <div class="text-sm text-gray-600 mb-3">Total conversions: <strong>${rows.length}</strong></div>
+                                    <div class="overflow-x-auto max-h-[520px] border rounded">
+                                        <table class="min-w-full text-sm bg-white">
+                                            <thead class="bg-gray-100 sticky top-0">
+                                                <tr>
+                                                    <th class="p-2 border-b text-left">S.No</th>
+                                                    <th class="p-2 border-b text-left">Date</th>
+                                                    <th class="p-2 border-b text-left">Reference</th>
+                                                    <th class="p-2 border-b text-left">Variant</th>
+                                                    <th class="p-2 border-b text-right">Output Qty</th>
+                                                    <th class="p-2 border-b text-left">Bulk Item</th>
+                                                    <th class="p-2 border-b text-right">Bulk Qty</th>
+                                                    <th class="p-2 border-b text-left">Pack Size</th>
+                                                    <th class="p-2 border-b text-left">Defaults Source</th>
+                                                    <th class="p-2 border-b text-left">Package</th>
+                                                    <th class="p-2 border-b text-right">Pack Qty</th>
+                                                    <th class="p-2 border-b text-left">Label Mode</th>
+                                                    <th class="p-2 border-b text-left">Label Item</th>
+                                                    <th class="p-2 border-b text-right">Label Qty</th>
+                                                    <th class="p-2 border-b text-left">Additional Details</th>
+                                                    <th class="p-2 border-b text-left">Remaining Location</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${rows.length ? rows.map(r => `<tr class="hover:bg-gray-50"><td class="p-2 border-b">${r.sno}</td><td class="p-2 border-b">${r.date}</td><td class="p-2 border-b font-mono">${r.reference}</td><td class="p-2 border-b font-semibold">${r.variant}</td><td class="p-2 border-b text-right">${r.outputQty.toFixed(3)}</td><td class="p-2 border-b">${r.bulkItem}</td><td class="p-2 border-b text-right">${r.bulkQty.toFixed(3)}</td><td class="p-2 border-b">${r.packSize}</td><td class="p-2 border-b text-xs">${r.defaultSource}</td><td class="p-2 border-b">${r.packageItem}</td><td class="p-2 border-b text-right">${r.packageQty.toFixed(3)}</td><td class="p-2 border-b">${r.labelMode}</td><td class="p-2 border-b">${r.labelItem}</td><td class="p-2 border-b text-right">${r.labelQty.toFixed(3)}</td><td class="p-2 border-b text-xs">${r.extraDefaults}</td><td class="p-2 border-b text-xs bg-blue-50 text-blue-900">${r.remainingLocation}</td></tr>`).join('') : '<tr><td colspan="16" class="p-4 text-center text-gray-500">No conversion data in selected period.</td></tr>'}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>`;
+
+                            document.getElementById('pack-report-apply').addEventListener('click', render);
+                        };
+
+                        render();
+                    }
+
+                    function exportPackFromBulkReportCSV() {
+                        const d = window._lastPackFromBulkReportData;
+                        if (!d || !Array.isArray(d.rows)) { if (typeof showToast === 'function') showToast('Generate report first', 'warning'); return; }
+                        let csv = 'Pack From Bulk Conversion Report\n';
+                        csv += 'Start Date,' + (d.startDate || '') + '\n';
+                        csv += 'End Date,' + (d.endDate || '') + '\n';
+                        csv += 'Total Rows,' + d.rows.length + '\n\n';
+                        csv += 'S.No,Date,Reference,Variant,Output Qty,Bulk Item,Bulk Qty,Pack Size,Defaults Source,Package Item,Package Qty,Label Mode,Label Item,Label Qty,Additional Details,Remaining Location,Notes\n';
+                        d.rows.forEach(r => {
+                            csv += [
+                                r.sno,
+                                r.date,
+                                '"' + String(r.reference || '').replace(/"/g, '""') + '"',
+                                '"' + String(r.variant || '').replace(/"/g, '""') + '"',
+                                r.outputQty.toFixed(3),
+                                '"' + String(r.bulkItem || '').replace(/"/g, '""') + '"',
+                                r.bulkQty.toFixed(3),
+                                '"' + String(r.packSize || '').replace(/"/g, '""') + '"',
+                                '"' + String(r.defaultSource || '').replace(/"/g, '""') + '"',
+                                '"' + String(r.packageItem || '').replace(/"/g, '""') + '"',
+                                r.packageQty.toFixed(3),
+                                r.labelMode,
+                                '"' + String(r.labelItem || '').replace(/"/g, '""') + '"',
+                                r.labelQty.toFixed(3),
+                                '"' + String(r.extraDefaults || '').replace(/"/g, '""') + '"',
+                                '"' + String(r.remainingLocation || 'Not recorded').replace(/"/g, '""') + '"',
+                                '"' + String(r.notes || '').replace(/"/g, '""') + '"'
+                            ].join(',') + '\n';
+                        });
+
+                        downloadFile(`pack_conversions_${new Date().toISOString().split('T')[0]}.csv`, csv, 'text/csv;charset=utf-8;');
+                        if (typeof showToast === 'function') showToast(`📊 Exported ${d.rows.length} conversion records`, 'success');
                     }
 
                     function renderDailyReportContent() {
@@ -24888,6 +25104,552 @@
                         document.getElementById('newBatchModal').remove();
                     };
 
+                    window.buildPackVariantName = function (bulkName, packageName, labelMode) {
+                        const modeLabel = String(labelMode || 'normal').toLowerCase() === 'white' ? 'White Label' : 'Normal Label';
+                        return `${bulkName} - ${packageName} - ${modeLabel}`;
+                    };
+
+                    window.getPackFromBulkHistoryRows = function () {
+                        return (appState.transactions || [])
+                            .filter(t => t && t.type === 'production-add' && (String(t.subtype || '').indexOf('pack-from-bulk') === 0 || String(t.subtype || '') === 'multi-pack-bulk'))
+                            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+                            .slice(0, 8);
+                    };
+
+                    window.renderPackFromBulkPanel = function () {
+                        const today = typeof getToday === 'function' ? getToday() : new Date().toISOString().split('T')[0];
+                        const fgList = (appState.inventory && appState.inventory.finishedGoods ? appState.inventory.finishedGoods : []).filter(it => {
+                            try {
+                                const st = calculateStock(it, 'finishedGoods', today);
+                                return (st.closingStock || 0) > 0;
+                            } catch (e) {
+                                return false;
+                            }
+                        });
+                        const packList = (appState.inventory && appState.inventory.packingMaterials ? appState.inventory.packingMaterials : []).filter(it => {
+                            try {
+                                const st = calculateStock(it, 'packingMaterials', today);
+                                return (st.closingStock || 0) > 0;
+                            } catch (e) {
+                                return false;
+                            }
+                        });
+                        const labelList = (appState.inventory && appState.inventory.labels ? appState.inventory.labels : []).filter(it => {
+                            try {
+                                const st = calculateStock(it, 'labels', today);
+                                return (st.closingStock || 0) > 0;
+                            } catch (e) {
+                                return false;
+                            }
+                        });
+                        const historyRows = window.getPackFromBulkHistoryRows ? window.getPackFromBulkHistoryRows() : [];
+
+                        return `
+                    <div class="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <h4 class="text-sm font-black text-emerald-800 uppercase tracking-wider mb-3">Pack From Bulk (Auto Fill + Audit Trail)</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Bulk Product</label>
+                                <select id="pfb-bulk-item" class="w-full p-2 border rounded text-sm" onchange="autoFillPackFromBulkDefaults(); updatePackVariantPreview();">
+                                    <option value="">-- Select Bulk Product --</option>
+                                    ${fgList.map(it => {
+                                        let closing = 0;
+                                        try { closing = calculateStock(it, 'finishedGoods', today).closingStock || 0; } catch (e) { }
+                                        return `<option value="${it.id}">${it.name} (Avail: ${Number(closing).toFixed(3)} ${it.unit || ''})</option>`;
+                                    }).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Pack Size</label>
+                                <select id="pfb-pack-size" class="w-full p-2 border rounded text-sm" onchange="autoFillPackFromBulkDefaults(); updatePackVariantPreview();">
+                                    <option value="">-- Select Pack Size --</option>
+                                    <option value="100ml">100ml</option>
+                                    <option value="250ml">250ml</option>
+                                    <option value="500ml">500ml</option>
+                                    <option value="1L">1L</option>
+                                    <option value="5L">5L</option>
+                                    <option value="10L">10L</option>
+                                    <option value="250gm">250gm</option>
+                                    <option value="500gm">500gm</option>
+                                    <option value="1kg">1kg</option>
+                                    <option value="2kg">2kg</option>
+                                    <option value="5kg">5kg</option>
+                                    <option value="Bulk">Bulk</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Bottle / Package (Required)</label>
+                                <select id="pfb-package-item" class="w-full p-2 border rounded text-sm" onchange="updatePackVariantPreview()">
+                                    <option value="">-- Select Bottle / Package --</option>
+                                    ${packList.map(it => {
+                                        let closing = 0;
+                                        try { closing = calculateStock(it, 'packingMaterials', today).closingStock || 0; } catch (e) { }
+                                        return `<option value="${it.id}">${it.name} (Avail: ${Number(closing).toFixed(3)} ${it.unit || ''})</option>`;
+                                    }).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Label Mode</label>
+                                <select id="pfb-label-mode" class="w-full p-2 border rounded text-sm" onchange="togglePackLabelInputs(); autoFillPackFromBulkDefaults(); updatePackVariantPreview();">
+                                    <option value="normal">Normal Label</option>
+                                    <option value="white">White Label</option>
+                                </select>
+                            </div>
+                            <div id="pfb-label-wrap">
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Label Item</label>
+                                <select id="pfb-label-item" class="w-full p-2 border rounded text-sm">
+                                    <option value="">-- Select Label --</option>
+                                    ${labelList.map(it => {
+                                        let closing = 0;
+                                        try { closing = calculateStock(it, 'labels', today).closingStock || 0; } catch (e) { }
+                                        return `<option value="${it.id}">${it.name} (Avail: ${Number(closing).toFixed(3)} ${it.unit || ''})</option>`;
+                                    }).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Bulk Qty to Consume</label>
+                                <input id="pfb-bulk-consume" type="number" step="0.001" min="0" class="w-full p-2 border rounded text-sm" placeholder="0" onchange="autoFillPackFromBulkDefaults();">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Package Qty to Consume</label>
+                                <input id="pfb-package-consume" type="number" step="0.001" min="0" class="w-full p-2 border rounded text-sm" placeholder="0">
+                            </div>
+                            <div id="pfb-label-qty-wrap">
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Label Qty to Consume</label>
+                                <input id="pfb-label-consume" type="number" step="0.001" min="0" class="w-full p-2 border rounded text-sm" placeholder="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Variant Qty to Add</label>
+                                <input id="pfb-output-qty" type="number" step="0.001" min="0" class="w-full p-2 border rounded text-sm" placeholder="0" onchange="autoFillPackFromBulkDefaults();">
+                            </div>
+                            <div class="md:col-span-2">
+                                <div id="pfb-auto-fill-status" class="bg-white border border-emerald-200 rounded p-3 text-xs text-gray-600">Select bulk product + pack size to auto-fill from formula or universal defaults.</div>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Additional Pack Details</label>
+                                <div id="pfb-extra-defaults" class="bg-white border rounded p-3 text-xs text-gray-500">No additional defaults loaded.</div>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Remaining Liquid Location</label>
+                                <input id="pfb-remaining-location" type="text" class="w-full p-2 border rounded text-sm" placeholder="e.g., Bulk Drum #5, Shelf A">
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Reference / Batch Note</label>
+                                <input id="pfb-ref" type="text" class="w-full p-2 border rounded text-sm" placeholder="PK-REF-001">
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Variant Preview</label>
+                                <input id="pfb-variant-preview" type="text" readonly class="w-full p-2 border rounded bg-gray-100 text-sm" value="Select bulk + bottle">
+                            </div>
+                        </div>
+                        <div class="flex justify-end mt-3">
+                            <button onclick="executePackFromBulk()" class="px-4 py-2 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700">Convert Bulk To Variant</button>
+                        </div>
+
+                        <div class="mt-4 bg-white border rounded overflow-hidden">
+                            <div class="px-3 py-2 border-b bg-gray-50 text-xs font-bold uppercase text-gray-600">Recent Pack Conversions</div>
+                            <div class="max-h-48 overflow-y-auto">
+                                <table class="w-full text-xs">
+                                    <thead class="bg-gray-100 sticky top-0">
+                                        <tr>
+                                            <th class="p-2 text-left">Date</th>
+                                            <th class="p-2 text-left">Variant</th>
+                                            <th class="p-2 text-right">Qty Added</th>
+                                            <th class="p-2 text-left">Ref</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${historyRows.length ? historyRows.map(t => `<tr class="border-t"><td class="p-2">${(t.date || '').split('T')[0] || '-'}</td><td class="p-2">${t.itemName || '-'}</td><td class="p-2 text-right">${Number(t.quantity || 0).toFixed(3)}</td><td class="p-2">${t.batchNo || '-'}</td></tr>`).join('') : '<tr><td class="p-2 text-gray-500" colspan="4">No conversions yet.</td></tr>'}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>`;
+                    };
+
+                    window.normalizePackSizeTokenForBulk = function (value) {
+                        return String(value || '').replace(/\s+/g, '').toLowerCase();
+                    };
+
+                    window.getPackSizeBaseQuantityForBulk = function (packSize) {
+                        const match = String(packSize || '').trim().match(/^([0-9]*\.?[0-9]+)\s*(ml|l|gm|kg)$/i);
+                        if (!match) return 1;
+                        const amount = parseFloat(match[1]) || 1;
+                        const unit = String(match[2] || '').toLowerCase();
+                        if (unit === 'ml' || unit === 'gm') return amount / 1000;
+                        return amount;
+                    };
+
+                    window.calculatePackRequirementQtyForBulk = function (entry, packCount) {
+                        const item = findItem(entry.category || 'packingMaterials', entry.itemId);
+                        const itemName = String((item && item.name) || entry.itemName || entry.itemId || '');
+                        let qtyPerCoverage = parseFloat((entry && entry.quantity) || 0) || 0;
+                        let coverageQty = parseFloat((entry && (entry.coverageQty || entry.coveragePacks)) || 0) || 0;
+                        let roundingMode = String((entry && entry.roundingMode) || '').toLowerCase();
+
+                        // Backward compatibility for older carton config stored as 0.1 per pack.
+                        if (/(box|carton|corrugated)/i.test(itemName) && qtyPerCoverage > 0 && qtyPerCoverage < 1 && coverageQty <= 0 && !roundingMode) {
+                            coverageQty = Math.round(1 / qtyPerCoverage);
+                            qtyPerCoverage = 1;
+                            roundingMode = 'ceil';
+                        }
+
+                        if (coverageQty <= 0) coverageQty = 1;
+                        if (!roundingMode) roundingMode = 'exact';
+                        if (packCount <= 0 || qtyPerCoverage <= 0 || coverageQty <= 0) return 0;
+                        const groups = packCount / coverageQty;
+                        if (roundingMode === 'ceil' || roundingMode === 'roundup' || roundingMode === 'up') {
+                            return qtyPerCoverage * Math.ceil(groups);
+                        }
+                        return qtyPerCoverage * groups;
+                    };
+
+                    window.shouldAutoCalculatePackEntryForBulk = function (entry) {
+                        if (!entry) return false;
+                        if (entry.category === 'labels') return true;
+                        const item = findItem(entry.category || 'packingMaterials', entry.itemId);
+                        const itemName = String((item && item.name) || entry.itemName || entry.itemId || '');
+                        return !/(tape|strap|strapping|belt)/i.test(itemName);
+                    };
+
+                    window.getFormulaPackEntriesForBulk = function (formula, packSize) {
+                        if (!formula || !formula.packingRequirements) return [];
+                        let raw = formula.packingRequirements[packSize];
+                        if (raw === undefined) {
+                            const wanted = window.normalizePackSizeTokenForBulk ? window.normalizePackSizeTokenForBulk(packSize) : String(packSize || '').toLowerCase();
+                            const matchedKey = Object.keys(formula.packingRequirements || {}).find(key => {
+                                return (window.normalizePackSizeTokenForBulk ? window.normalizePackSizeTokenForBulk(key) : String(key || '').toLowerCase()) === wanted;
+                            });
+                            if (matchedKey) raw = formula.packingRequirements[matchedKey];
+                        }
+                        if (Array.isArray(raw)) return raw;
+                        if (raw && Array.isArray(raw.materials)) return raw.materials;
+                        return [];
+                    };
+
+                    window.findFormulaForBulkItem = function (bulkItem) {
+                        const formulas = appState.formulas || [];
+                        if (!bulkItem) return null;
+                        const candidates = [bulkItem.name, bulkItem.bulkSourceName].filter(Boolean).map(v => String(v).toLowerCase().trim());
+                        return formulas.find(f => candidates.includes(String(f.name || '').toLowerCase().trim())) || null;
+                    };
+
+                    window.getUniversalPackEntriesForBulk = function (packSize) {
+                        const source = appState.universalPackDetails || {};
+                        let raw = source[packSize];
+                        if (raw === undefined) {
+                            const wanted = window.normalizePackSizeTokenForBulk ? window.normalizePackSizeTokenForBulk(packSize) : String(packSize || '').toLowerCase();
+                            const matchedKey = Object.keys(source || {}).find(key => {
+                                return (window.normalizePackSizeTokenForBulk ? window.normalizePackSizeTokenForBulk(key) : String(key || '').toLowerCase()) === wanted;
+                            });
+                            if (matchedKey) raw = source[matchedKey];
+                        }
+                        if (Array.isArray(raw)) return raw;
+                        if (raw && Array.isArray(raw.materials)) return raw.materials;
+                        return [];
+                    };
+
+                    window.resolvePackDefaultsForBulk = function (bulkItem, packSize) {
+                        const formula = window.findFormulaForBulkItem ? window.findFormulaForBulkItem(bulkItem) : null;
+                        const formulaEntries = window.getFormulaPackEntriesForBulk ? window.getFormulaPackEntriesForBulk(formula, packSize) : [];
+                        if (formulaEntries.length) return { materials: formulaEntries, source: 'formula', formulaName: formula ? formula.name : '' };
+                        const universalEntries = window.getUniversalPackEntriesForBulk ? window.getUniversalPackEntriesForBulk(packSize) : [];
+                        if (universalEntries.length) return { materials: universalEntries, source: 'universal', formulaName: formula ? formula.name : '' };
+                        return { materials: [], source: 'none', formulaName: formula ? formula.name : '' };
+                    };
+
+                    window.classifyPackDefaultEntries = function (materials) {
+                        const bottleRegex = /(bottle|container|jar|can|flask|jerry|pouch|drum|bucket|pack)/i;
+                        let primaryPackage = null;
+                        let primaryLabel = null;
+                        const additional = [];
+                        (materials || []).forEach(entry => {
+                            const category = entry.category || 'packingMaterials';
+                            const item = findItem(category, entry.itemId);
+                            const itemName = String(item && item.name || entry.itemId || '');
+                            if (category === 'labels' && !primaryLabel) {
+                                primaryLabel = Object.assign({}, entry, { itemName: itemName });
+                                return;
+                            }
+                            if (category === 'packingMaterials' && bottleRegex.test(itemName) && !primaryPackage) {
+                                primaryPackage = Object.assign({}, entry, { itemName: itemName });
+                                return;
+                            }
+                            additional.push(Object.assign({}, entry, { itemName: itemName }));
+                        });
+                        if (!primaryPackage) {
+                            const firstPackingIndex = additional.findIndex(entry => entry.category === 'packingMaterials');
+                            if (firstPackingIndex >= 0) primaryPackage = additional.splice(firstPackingIndex, 1)[0];
+                        }
+                        if (!primaryLabel) {
+                            const firstLabelIndex = additional.findIndex(entry => entry.category === 'labels');
+                            if (firstLabelIndex >= 0) primaryLabel = additional.splice(firstLabelIndex, 1)[0];
+                        }
+                        return { primaryPackage, primaryLabel, additional };
+                    };
+
+                    window.renderPackFromBulkExtraDefaults = function (entries) {
+                        const container = document.getElementById('pfb-extra-defaults');
+                        if (!container) return;
+                        if (!entries || !entries.length) {
+                            container.innerHTML = '<span class="text-gray-500">No additional defaults loaded.</span>';
+                            return;
+                        }
+                        container.innerHTML = entries.map((entry, index) => {
+                            const item = findItem(entry.category, entry.itemId);
+                            const name = item ? item.name : (entry.itemName || entry.itemId);
+                            const unit = entry.unit || (item ? item.unit : '');
+                            return `<div class="flex items-center gap-2 mb-2 last:mb-0" data-extra-default-index="${index}"><span class="flex-1 font-medium text-gray-700">${name}</span><input type="number" step="0.001" min="0" class="pfb-extra-default-qty w-24 p-1 border rounded text-right" value="${Number(entry.calculatedQty || 0).toFixed(3)}"><span class="w-12 text-center text-gray-500">${unit}</span><input type="hidden" class="pfb-extra-default-item" value="${entry.itemId}"><input type="hidden" class="pfb-extra-default-category" value="${entry.category}"></div>`;
+                        }).join('');
+                    };
+
+                    window.autoFillPackFromBulkDefaults = function () {
+                        const bulkId = (document.getElementById('pfb-bulk-item') || {}).value;
+                        const packSize = (document.getElementById('pfb-pack-size') || {}).value;
+                        const outputQty = parseFloat((document.getElementById('pfb-output-qty') || {}).value) || 0;
+                        const status = document.getElementById('pfb-auto-fill-status');
+                        const packageSelect = document.getElementById('pfb-package-item');
+                        const packageQtyInput = document.getElementById('pfb-package-consume');
+                        const labelMode = ((document.getElementById('pfb-label-mode') || {}).value || 'normal').toLowerCase();
+                        const labelSelect = document.getElementById('pfb-label-item');
+                        const labelQtyInput = document.getElementById('pfb-label-consume');
+                        if (!status) return;
+                        if (!bulkId || !packSize) {
+                            status.textContent = 'Select bulk product + pack size to auto-fill from formula or universal defaults.';
+                            window.renderPackFromBulkExtraDefaults([]);
+                            return;
+                        }
+                        const bulkItem = findItem('finishedGoods', bulkId);
+                        if (!bulkItem) {
+                            status.textContent = 'Selected bulk product could not be found.';
+                            window.renderPackFromBulkExtraDefaults([]);
+                            return;
+                        }
+                        const resolved = window.resolvePackDefaultsForBulk ? window.resolvePackDefaultsForBulk(bulkItem, packSize) : { materials: [], source: 'none' };
+                        if (!resolved.materials.length) {
+                            status.textContent = `No formula or universal defaults found for ${packSize}. You can still fill the package details manually.`;
+                            window.renderPackFromBulkExtraDefaults([]);
+                            return;
+                        }
+                        const scaleBase = window.getPackSizeBaseQuantityForBulk ? window.getPackSizeBaseQuantityForBulk(packSize) : 1;
+                        const packCount = scaleBase > 0 ? (outputQty / scaleBase) : 0;
+                        const scaledMaterials = resolved.materials
+                            .filter(entry => window.shouldAutoCalculatePackEntryForBulk ? window.shouldAutoCalculatePackEntryForBulk(entry) : true)
+                            .map(entry => Object.assign({}, entry, {
+                                calculatedQty: window.calculatePackRequirementQtyForBulk ? window.calculatePackRequirementQtyForBulk(entry, packCount) : (scaleBase > 0 ? ((parseFloat(entry.quantity) || 0) * outputQty) / scaleBase : (parseFloat(entry.quantity) || 0))
+                            }));
+                        const classified = window.classifyPackDefaultEntries ? window.classifyPackDefaultEntries(scaledMaterials) : { additional: [] };
+                        if (classified.primaryPackage && packageSelect) {
+                            packageSelect.value = String(classified.primaryPackage.itemId);
+                            if (packageQtyInput) packageQtyInput.value = Number(classified.primaryPackage.calculatedQty || 0).toFixed(3);
+                        }
+                        if (labelMode !== 'white' && classified.primaryLabel && labelSelect) {
+                            labelSelect.value = String(classified.primaryLabel.itemId);
+                            if (labelQtyInput) labelQtyInput.value = Number(classified.primaryLabel.calculatedQty || 0).toFixed(3);
+                        }
+                        if (labelMode === 'white' && labelQtyInput) labelQtyInput.value = '0';
+                        window.renderPackFromBulkExtraDefaults(classified.additional || []);
+                        const sourceText = resolved.source === 'universal' ? 'universal pack defaults' : 'formula pack details';
+                        status.textContent = `Auto-filled from ${sourceText} for ${packSize}. Review package, label, and additional defaults before conversion.`;
+                    };
+
+                    window.togglePackLabelInputs = function () {
+                        const mode = (document.getElementById('pfb-label-mode') || {}).value || 'normal';
+                        const labelWrap = document.getElementById('pfb-label-wrap');
+                        const labelQtyWrap = document.getElementById('pfb-label-qty-wrap');
+                        const labelQty = document.getElementById('pfb-label-consume');
+                        if (mode === 'white') {
+                            if (labelWrap) labelWrap.classList.add('opacity-50');
+                            if (labelQtyWrap) labelQtyWrap.classList.add('opacity-50');
+                            if (labelQty) labelQty.value = '0';
+                        } else {
+                            if (labelWrap) labelWrap.classList.remove('opacity-50');
+                            if (labelQtyWrap) labelQtyWrap.classList.remove('opacity-50');
+                        }
+                    };
+
+                    window.updatePackVariantPreview = function () {
+                        const bulkSel = document.getElementById('pfb-bulk-item');
+                        const packSel = document.getElementById('pfb-package-item');
+                        const modeSel = document.getElementById('pfb-label-mode');
+                        const preview = document.getElementById('pfb-variant-preview');
+                        if (!preview) return;
+                        if (!bulkSel || !packSel || !bulkSel.value || !packSel.value) {
+                            preview.value = 'Select bulk + bottle';
+                            return;
+                        }
+                        const bulkItem = findItem('finishedGoods', bulkSel.value);
+                        const packItem = findItem('packingMaterials', packSel.value);
+                        const mode = (modeSel && modeSel.value) || 'normal';
+                        if (!bulkItem || !packItem) {
+                            preview.value = 'Select bulk + bottle';
+                            return;
+                        }
+                        preview.value = window.buildPackVariantName(bulkItem.name, packItem.name, mode);
+                    };
+
+                    window.executePackFromBulk = function () {
+                        const bulkId = (document.getElementById('pfb-bulk-item') || {}).value;
+                        const packSize = (document.getElementById('pfb-pack-size') || {}).value;
+                        const packageId = (document.getElementById('pfb-package-item') || {}).value;
+                        const labelMode = ((document.getElementById('pfb-label-mode') || {}).value || 'normal').toLowerCase();
+                        const labelId = (document.getElementById('pfb-label-item') || {}).value;
+                        const bulkQty = parseFloat((document.getElementById('pfb-bulk-consume') || {}).value) || 0;
+                        const packageQty = parseFloat((document.getElementById('pfb-package-consume') || {}).value) || 0;
+                        const labelQty = parseFloat((document.getElementById('pfb-label-consume') || {}).value) || 0;
+                        const outputQty = parseFloat((document.getElementById('pfb-output-qty') || {}).value) || 0;
+                        const remainingLocation = ((document.getElementById('pfb-remaining-location') || {}).value || '').trim();
+                        const ref = ((document.getElementById('pfb-ref') || {}).value || '').trim() || ('PK-' + Date.now());
+                        const date = new Date().toISOString();
+                        const today = typeof getToday === 'function' ? getToday() : date.split('T')[0];
+
+                        if (!bulkId) { showAlert('Select a bulk product.'); return; }
+                        if (!packSize) { showAlert('Select a pack size.'); return; }
+                        if (!packageId) { showAlert('Bottle/package selection is mandatory.'); return; }
+                        if (!remainingLocation) { showAlert('Enter remaining liquid location.'); return; }
+                        if (bulkQty <= 0 || packageQty <= 0 || outputQty <= 0) { showAlert('Bulk, package and output quantities must be greater than 0.'); return; }
+                        if (labelMode !== 'white' && (!labelId || labelQty <= 0)) { showAlert('For normal label mode, select label item and enter label quantity.'); return; }
+
+                        const bulkItem = findItem('finishedGoods', bulkId);
+                        const packageItem = findItem('packingMaterials', packageId);
+                        const labelItem = labelId ? findItem('labels', labelId) : null;
+                        if (!bulkItem || !packageItem) { showAlert('Could not find selected stock items.'); return; }
+
+                        const extraDefaults = Array.from(document.querySelectorAll('#pfb-extra-defaults [data-extra-default-index]')).map(row => ({
+                            itemId: (row.querySelector('.pfb-extra-default-item') || {}).value,
+                            category: (row.querySelector('.pfb-extra-default-category') || {}).value,
+                            quantity: parseFloat((row.querySelector('.pfb-extra-default-qty') || {}).value) || 0
+                        })).filter(entry => entry.itemId && entry.quantity > 0);
+
+                        const bulkAvail = (calculateStock(bulkItem, 'finishedGoods', today).closingStock || 0);
+                        const packageAvail = (calculateStock(packageItem, 'packingMaterials', today).closingStock || 0);
+                        const labelAvail = labelItem ? (calculateStock(labelItem, 'labels', today).closingStock || 0) : 0;
+                        if (bulkAvail < bulkQty) { showAlert(`Insufficient bulk stock. Available: ${bulkAvail.toFixed(3)}`); return; }
+                        if (packageAvail < packageQty) { showAlert(`Insufficient package stock. Available: ${packageAvail.toFixed(3)}`); return; }
+                        if (labelMode !== 'white' && labelItem && labelAvail < labelQty) { showAlert(`Insufficient label stock. Available: ${labelAvail.toFixed(3)}`); return; }
+                        for (let index = 0; index < extraDefaults.length; index++) {
+                            const extra = extraDefaults[index];
+                            const extraItem = findItem(extra.category, extra.itemId);
+                            if (!extraItem) { showAlert('Additional default item not found.'); return; }
+                            const extraAvail = calculateStock(extraItem, extra.category, today).closingStock || 0;
+                            if (extraAvail < extra.quantity) { showAlert(`Insufficient stock for ${extraItem.name}. Available: ${Number(extraAvail).toFixed(3)}`); return; }
+                        }
+
+                        const resolvedDefaults = window.resolvePackDefaultsForBulk ? window.resolvePackDefaultsForBulk(bulkItem, packSize) : { source: 'none', formulaName: '' };
+                        const variantName = window.buildPackVariantName(bulkItem.name, packageItem.name, labelMode);
+                        let variantItem = (appState.inventory.finishedGoods || []).find(it => String(it.name || '').toLowerCase() === String(variantName).toLowerCase());
+                        if (!variantItem) {
+                            const newId = Date.now() + Math.floor(Math.random() * 1000000);
+                            variantItem = {
+                                id: newId,
+                                name: variantName,
+                                type: 'finishedGoods',
+                                unit: bulkItem.unit || 'pcs',
+                                currentAverageCost: bulkItem.currentAverageCost || bulkItem.price || 0,
+                                minStock: 0,
+                                description: 'Auto-created from bulk conversion',
+                                serialNo: typeof getNextLockedSerialNumber === 'function' ? getNextLockedSerialNumber('finishedGoods') : undefined,
+                                packageType: packageItem.name,
+                                labelMode: labelMode,
+                                bulkSourceName: bulkItem.name
+                            };
+                            if (!appState.inventory.finishedGoods) appState.inventory.finishedGoods = [];
+                            appState.inventory.finishedGoods.push(variantItem);
+                        }
+
+                        if (!appState.transactions) appState.transactions = [];
+
+                        appState.transactions.push({
+                            id: Date.now() + Math.random(),
+                            itemId: bulkItem.id,
+                            itemName: bulkItem.name,
+                            category: 'finishedGoods',
+                            type: 'production-consume',
+                            subtype: 'pack-from-bulk-bulk',
+                            quantity: bulkQty,
+                            date: date,
+                            batchNo: ref,
+                            notes: `[PackFromBulk] Bulk used for ${variantName}`
+                        });
+                        appState.transactions.push({
+                            id: Date.now() + Math.random(),
+                            itemId: packageItem.id,
+                            itemName: packageItem.name,
+                            category: 'packingMaterials',
+                            type: 'production-consume',
+                            subtype: 'pack-from-bulk-package',
+                            quantity: packageQty,
+                            date: date,
+                            batchNo: ref,
+                            notes: `[PackFromBulk] Package used for ${variantName}`
+                        });
+                        if (labelMode !== 'white' && labelItem && labelQty > 0) {
+                            appState.transactions.push({
+                                id: Date.now() + Math.random(),
+                                itemId: labelItem.id,
+                                itemName: labelItem.name,
+                                category: 'labels',
+                                type: 'production-consume',
+                                subtype: 'pack-from-bulk-label',
+                                quantity: labelQty,
+                                date: date,
+                                batchNo: ref,
+                                notes: `[PackFromBulk] Label used for ${variantName}`
+                            });
+                        }
+                        extraDefaults.forEach(extra => {
+                            const extraItem = findItem(extra.category, extra.itemId);
+                            appState.transactions.push({
+                                id: Date.now() + Math.random(),
+                                itemId: extraItem.id,
+                                itemName: extraItem.name,
+                                category: extra.category,
+                                type: 'production-consume',
+                                subtype: 'pack-from-bulk-extra',
+                                quantity: extra.quantity,
+                                date: date,
+                                batchNo: ref,
+                                notes: `[PackFromBulk] Additional default used for ${variantName}`
+                            });
+                        });
+
+                        appState.transactions.push({
+                            id: Date.now() + Math.random(),
+                            itemId: variantItem.id,
+                            itemName: variantItem.name,
+                            category: 'finishedGoods',
+                            type: 'production-add',
+                            subtype: 'pack-from-bulk',
+                            quantity: outputQty,
+                            date: date,
+                            batchNo: ref,
+                            notes: `[PackFromBulk] Source ${bulkItem.name} | ${packageItem.name} | ${labelMode === 'white' ? 'White Label' : 'Normal Label'}`,
+                            conversionDetails: {
+                                sourceBulkId: bulkItem.id,
+                                sourceBulkName: bulkItem.name,
+                                formulaName: resolvedDefaults.formulaName || '',
+                                packSize: packSize,
+                                defaultSource: resolvedDefaults.source || 'none',
+                                bulkQtyUsed: bulkQty,
+                                packageUsed: packageItem.name,
+                                packageQtyUsed: packageQty,
+                                labelUsed: labelItem ? labelItem.name : null,
+                                labelQtyUsed: labelQty,
+                                additionalDefaults: extraDefaults.map(extra => {
+                                    const extraItem = findItem(extra.category, extra.itemId);
+                                    return { itemId: extra.itemId, itemName: extraItem ? extraItem.name : extra.itemId, category: extra.category, quantity: extra.quantity };
+                                }),
+                                outputQty: outputQty,
+                                remainingLocation: remainingLocation || 'Not recorded',
+                                conversionDate: today
+                            }
+                        });
+
+                        saveState();
+                        renderProductionWIPView();
+                        showAlert(`✅ Bulk converted successfully.\n\nVariant: ${variantItem.name}\nPack Size: ${packSize}\nOutput: ${outputQty} units\nRemaining stored at: ${remainingLocation}`);
+                    };
+
                     // ---------------------------------------------------------
                     // RENDER: PRODUCTION / WIP VIEW (NEW 2-COLUMN LAYOUT)
                     // FIXED: Now uses activeProduction like the button handlers
@@ -24908,9 +25670,249 @@
                                 b.id = Date.now() + i;
                                 stateChanged = true;
                             }
-                        });
-                        if (stateChanged) saveState();
+                                                // ====================================================================
+                                                // MULTI-PACK BULK CONVERSION FUNCTIONS
+                                                // ====================================================================
+                    
+                                                window.selectedMultiPackSizes = {}; // { "1L": 50, "500ml": 50 }
+                    
+                                                window.generateMultiPackCheckboxes = function() {
+                                                    const checkboxes = document.getElementById('mpb-pack-size-checkboxes');
+                                                    const quantities = document.getElementById('mpb-pack-quantities');
+                                                    if (!checkboxes || !quantities) return;
+                        
+                                                    const packSizes = ['100ml', '250ml', '500ml', '1L', '5L', '10L'];
+                                                    checkboxes.innerHTML = '';
+                                                    quantities.innerHTML = '';
+                                                    window.selectedMultiPackSizes = {};
+                        
+                                                    packSizes.forEach(size => {
+                                                        const label = document.createElement('label');
+                                                        label.className = 'flex items-center gap-2 p-2 border rounded cursor-pointer hover:bg-blue-100';
+                                                        label.innerHTML = `
+                                                            <input type="checkbox" value="${size}" onchange="toggleMultiPackSize('${size}');" class="mpb-pack-checkbox">
+                                                            <span class="text-sm font-medium">${size}</span>
+                                                        `;
+                                                        checkboxes.appendChild(label);
+                                                    });
+                                                };
+                    
+                                                window.toggleMultiPackSize = function(packSize) {
+                                                    const quantities = document.getElementById('mpb-pack-quantities');
+                                                    const checkboxes = document.querySelectorAll('.mpb-pack-checkbox');
+                                                    if (!quantities) return;
+                        
+                                                    window.selectedMultiPackSizes = {};
+                                                    quantities.innerHTML = '';
+                        
+                                                    Array.from(checkboxes).filter(cb => cb.checked).forEach(cb => {
+                                                        const size = cb.value;
+                                                        window.selectedMultiPackSizes[size] = 0;
+                            
+                                                        const div = document.createElement('div');
+                                                        div.className = 'flex gap-2 items-center';
+                                                        div.innerHTML = `
+                                                            <span class="text-sm font-medium text-gray-700 w-20">${size}</span>
+                                                            <input type="number" class="mpb-pack-qty flex-1 px-2 py-1 border rounded text-sm" step="0.01" min="0" 
+                                                                   data-pack-size="${size}" placeholder="Qty" 
+                                                                   onchange="window.selectedMultiPackSizes['${size}'] = parseFloat(this.value) || 0; updateMultiPackSummary();">
+                                                            <span class="text-xs text-gray-500">L</span>
+                                                        `;
+                                                        quantities.appendChild(div);
+                                                    });
+                                                };
+                    
+                                                window.updateMultiPackSummary = function() {
+                                                    const summary = document.getElementById('mpb-pack-summary');
+                                                    const grandTotal = Object.values(window.selectedMultiPackSizes).reduce((a, b) => a + b, 0);
+                        
+                                                    const entries = Object.entries(window.selectedMultiPackSizes)
+                                                        .filter(([_, qty]) => qty > 0)
+                                                        .map(([size, qty]) => `${qty}L (${size} pack)`)
+                                                        .join(' + ');
+                        
+                                                    if (grandTotal > 0) {
+                                                        summary.textContent = `📊 ${entries} = ${grandTotal}L total`;
+                                                        summary.classList.remove('hidden');
+                                                        document.getElementById('mpb-output-planned').value = grandTotal.toFixed(2);
+                                                    } else {
+                                                        summary.classList.add('hidden');
+                                                        document.getElementById('mpb-output-planned').value = '';
+                                                    }
+                                                };
+                    
+                                                window.updateMultiPackPreview = function() {
+                                                    const summary = document.getElementById('mpb-summary-preview');
+                                                    const bulkId = (document.getElementById('mpb-bulk-item') || {}).value;
+                                                    const bulkQty = parseFloat((document.getElementById('mpb-bulk-consume') || {}).value) || 0;
+                                                    const labelMode = (document.getElementById('mpb-label-mode') || {}).value || 'normal';
+                        
+                                                    if (!bulkId || bulkQty <= 0) {
+                                                        summary.value = 'Select bulk product and enter quantity to convert';
+                                                        return;
+                                                    }
+                        
+                                                    const bulkItem = findItem('finishedGoods', bulkId);
+                                                    if (!bulkItem) {
+                                                        summary.value = 'Could not find selected bulk product';
+                                                        return;
+                                                    }
+                        
+                                                    const packSizeList = Object.entries(window.selectedMultiPackSizes)
+                                                        .filter(([_, qty]) => qty > 0)
+                                                        .map(([size, qty]) => `${qty}L → ${size} packs`)
+                                                        .join(', ');
+                        
+                                                    if (!packSizeList) {
+                                                        summary.value = 'Select pack sizes above';
+                                                        return;
+                                                    }
+                        
+                                                    const planned = parseFloat(document.getElementById('mpb-output-planned').value) || 0;
+                                                    const actual = parseFloat(document.getElementById('mpb-output-actual').value) || 0;
+                                                    const overage = actual > 0 ? ` [Actual: ${actual}L, Overage: ${(actual - planned).toFixed(2)}L]` : '';
+                        
+                                                    summary.value = `Bulk: ${bulkItem.name}\nConsume: ${bulkQty}L\nPack into: ${packSizeList}\nLabel: ${labelMode}\n${overage}`;
+                                                };
+                    
+                                                window.updateMultiPackOverageDisplay = function() {
+                                                    const planned = parseFloat(document.getElementById('mpb-output-planned').value) || 0;
+                                                    const actual = parseFloat(document.getElementById('mpb-output-actual').value) || 0;
+                                                    const display = document.getElementById('mpb-overage-display');
+                                                    const text = document.getElementById('mpb-overage-text');
+                        
+                                                    if (actual > 0 && actual !== planned) {
+                                                        const overage = actual - planned;
+                                                        const percentage = ((overage / planned) * 100).toFixed(1);
+                                                        text.textContent = `Planned: ${planned}L | Actual: ${actual}L | Overage: ${overage.toFixed(2)}L (${percentage}%)`;
+                                                        display.classList.remove('hidden');
+                                                    } else {
+                                                        display.classList.add('hidden');
+                                                    }
+                                                    updateMultiPackPreview();
+                                                };
+                    
+                                                window.executeMultiPackBulkConversion = function() {
+                                                    const bulkId = (document.getElementById('mpb-bulk-item') || {}).value;
+                                                    const bulkQty = parseFloat((document.getElementById('mpb-bulk-consume') || {}).value) || 0;
+                                                    const labelMode = ((document.getElementById('mpb-label-mode') || {}).value || 'normal').toLowerCase();
+                                                    const ref = ((document.getElementById('mpb-ref') || {}).value || '').trim() || ('MPBK-' + Date.now());
+                                                    const remainingLocation = ((document.getElementById('mpb-remaining-location') || {}).value || '').trim();
+                                                    const outputPlanned = parseFloat(document.getElementById('mpb-output-planned').value) || 0;
+                                                    const outputActual = parseFloat(document.getElementById('mpb-output-actual').value) || 0;
+                        
+                                                    if (!bulkId) { showAlert('Select a bulk product'); return; }
+                                                    if (bulkQty <= 0) { showAlert('Enter bulk quantity to consume'); return; }
+                                                    if (outputPlanned <= 0) { showAlert('Select pack sizes and enter quantities'); return; }
+                        
+                                                    const bulkItem = findItem('finishedGoods', bulkId);
+                                                    if (!bulkItem) { showAlert('Could not find bulk product'); return; }
+                        
+                                                    const date = new Date().toISOString();
+                                                    const today = typeof getToday === 'function' ? getToday() : date.split('T')[0];
+                        
+                                                    const bulkAvail = (calculateStock(bulkItem, 'finishedGoods', today).closingStock || 0);
+                                                    if (bulkAvail < bulkQty) { showAlert(`Insufficient bulk stock. Available: ${bulkAvail.toFixed(3)}`); return; }
+                        
+                                                    if (!appState.transactions) appState.transactions = [];
+                        
+                                                    // Create conversion transaction for bulk consumption
+                                                    appState.transactions.push({
+                                                        id: Date.now() + Math.random(),
+                                                        itemId: bulkItem.id,
+                                                        itemName: bulkItem.name,
+                                                        category: 'finishedGoods',
+                                                        type: 'production-consume',
+                                                        subtype: 'multi-pack-bulk',
+                                                        quantity: bulkQty,
+                                                        date: date,
+                                                        batchNo: ref,
+                                                        notes: `[MultiPackBulk] Bulk used for multiple pack sizes conversion`
+                                                    });
+                        
+                                                    // Create purchase transactions for output of each pack size
+                                                    Object.entries(window.selectedMultiPackSizes).forEach(([packSize, qty]) => {
+                                                        if (qty <= 0) return;
+                            
+                                                        // Build variant name (simplified: just PackSize for multi-pack)
+                                                        const variantName = `${bulkItem.name} - ${packSize} (${labelMode === 'white' ? 'White Label' : 'Normal Label'})`;
+                            
+                                                        let variantItem = (appState.inventory.finishedGoods || [])
+                                                            .find(it => String(it.name || '').toLowerCase() === String(variantName).toLowerCase());
+                            
+                                                        if (!variantItem) {
+                                                            const newId = Date.now() + Math.floor(Math.random() * 1000000);
+                                                            variantItem = {
+                                                                id: newId,
+                                                                name: variantName,
+                                                                type: 'finishedGoods',
+                                                                unit: 'pcs',
+                                                                currentAverageCost: bulkItem.currentAverageCost || bulkItem.price || 0,
+                                                                minStock: 0,
+                                                                description: 'Auto-created from multi-pack bulk conversion',
+                                                                serialNo: typeof getNextLockedSerialNumber === 'function' ? getNextLockedSerialNumber('finishedGoods') : undefined,
+                                                                packageType: packSize,
+                                                                labelMode: labelMode,
+                                                                bulkSourceName: bulkItem.name
+                                                            };
+                                                            if (!appState.inventory.finishedGoods) appState.inventory.finishedGoods = [];
+                                                            appState.inventory.finishedGoods.push(variantItem);
+                                                        }
+                            
+                                                        // Add production transaction for this pack size
+                                                        appState.transactions.push({
+                                                            id: Date.now() + Math.random(),
+                                                            itemId: variantItem.id,
+                                                            itemName: variantItem.name,
+                                                            category: 'finishedGoods',
+                                                            type: 'production-add',
+                                                            subtype: 'multi-pack-bulk',
+                                                            quantity: qty,
+                                                            date: date,
+                                                            batchNo: ref,
+                                                            notes: `[MultiPackBulk] ${packSize} pack variant from ${bulkItem.name}`,
+                                                            conversionDetails: {
+                                                                sourceBulkId: bulkItem.id,
+                                                                sourceBulkName: bulkItem.name,
+                                                                bulkQtyUsed: bulkQty,
+                                                                selectedPackSizes: window.selectedMultiPackSizes,
+                                                                packSizeThisTxn: packSize,
+                                                                outputQty: qty,
+                                                                quantityPlanned: outputPlanned,
+                                                                quantityActual: outputActual,
+                                                                overage: outputActual > 0 ? (outputActual - outputPlanned) : 0,
+                                                                overagePercentage: outputActual > 0 && outputPlanned > 0 ? (((outputActual - outputPlanned) / outputPlanned) * 100).toFixed(1) : 0,
+                                                                remainingLocation: remainingLocation || 'Not recorded',
+                                                                labelMode: labelMode,
+                                                                conversionDate: today,
+                                                                multiPack: true
+                                                            }
+                                                        });
+                                                    });
+                        
+                                                    saveState();
+                                                    renderProductionWIPView();
+                                                    let packSizeList = Object.entries(window.selectedMultiPackSizes).filter(([_,q])=>q>0).map(([s,q])=>q+'L ('+s+')').join(', ');
+                                                    showAlert('✅ Multi-pack conversion completed!\n\nBulk Used: '+bulkQty+'L\nPack Sizes: '+packSizeList+'\nRemaining: '+(remainingLocation || 'Not recorded'));
+                        
+                                                    // Clear form
+                                                    document.getElementById('mpb-bulk-item').value = '';
+                                                    document.getElementById('mpb-bulk-consume').value = '';
+                                                    document.getElementById('mpb-output-actual').value = '';
+                                                    document.getElementById('mpb-ref').value = '';
+                                                    document.getElementById('mpb-remaining-location').value = '';
+                                                    window.selectedMultiPackSizes = {};
+                                                };
+                    
+                                                // Initialize multi-pack checkboxes on first load
+                                                setTimeout(() => {
+                                                    if (typeof window.generateMultiPackCheckboxes === 'function') {
+                                                        window.generateMultiPackCheckboxes();
+                                                    }
+                                                }, 500);
 
+                                                // ---------------------------------------------------------
+                                                // RENDER: PRODUCTION / WIP VIEW (NEW 2-COLUMN LAYOUT)
                         const todayStr = new Date().toISOString().split('T')[0];
 
                         let html = `
@@ -24962,9 +25964,97 @@
                          <div class="relative flex justify-center"><span class="bg-white px-2 text-xs text-gray-600 font-bold uppercase">✏️ Option 2: Manual Entry</span></div>
                     </div>
 
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Batch ID / Order Ref</label>
-                        <input type="text" id="np-batch" value="B-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}" class="w-full p-3 border rounded-lg font-mono text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    
+                    <!-- NEW: MULTI-PACK BULK CONVERSION -->
+                    <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <h4 class="text-sm font-black text-blue-800 uppercase tracking-wider mb-3">🔄 Multi-Pack Bulk Conversion (Split Into Multiple Sizes)</h4>
+                        <p class="text-xs text-gray-600 mb-4">Convert ONE bulk product into multiple pack sizes in one batch. Example: Convert 100L bulk into 50L (1L packs) + 50L (500ml packs)</p>
+                        
+                        <div class="space-y-4">
+                            <!-- Step 1: Select Bulk Product -->
+                            <div class="bg-white p-3 rounded border">
+                                <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Step 1: Select Bulk Product</label>
+                                <select id="mpb-bulk-item" class="w-full p-2 border rounded text-sm" onchange="updateMultiPackPreview()">
+                                    <option value="">-- Select Bulk Product --</option>
+                                    ${fgList.map(it => {
+                                        let closing = 0;
+                                        try { closing = calculateStock(it, 'finishedGoods', today).closingStock || 0; } catch (e) { }
+                                        return `<option value="${it.id}">${it.name} (Avail: ${Number(closing).toFixed(3)} ${it.unit || ''})</option>`;
+                                    }).join('')}
+                                </select>
+                            </div>
+                            
+                            <!-- Step 2: Select Pack Sizes -->
+                            <div class="bg-white p-3 rounded border">
+                                <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Step 2: Select Pack Sizes & Quantities</label>
+                                <div id="mpb-pack-size-checkboxes" class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
+                                    <!-- Generated dynamically -->
+                                </div>
+                                <div id="mpb-pack-quantities" class="space-y-2">
+                                    <!-- Quantity inputs generated for selected pack sizes -->
+                                </div>
+                                <div id="mpb-pack-summary" class="mt-3 p-2 bg-blue-100 text-blue-900 rounded text-xs font-semibold hidden">
+                                    <!-- Shows: 50L (1L pack) + 50L (500ml pack) = 100L total -->
+                                </div>
+                            </div>
+                            
+                            <!-- Step 3: Label Mode & Bulk Consume -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="bg-white p-3 rounded border">
+                                    <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Label Mode</label>
+                                    <select id="mpb-label-mode" class="w-full p-2 border rounded text-sm" onchange="updateMultiPackPreview();">
+                                        <option value="normal">Normal Label</option>
+                                        <option value="white">White Label</option>
+                                    </select>
+                                </div>
+                                <div class="bg-white p-3 rounded border">
+                                    <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Total Bulk Qty to Consume</label>
+                                    <input id="mpb-bulk-consume" type="number" step="0.01" min="0" class="w-full p-2 border rounded text-sm" placeholder="100" onchange="updateMultiPackPreview();">
+                                </div>
+                            </div>
+                            
+                            <!-- Step 4: Actual Output & Overage -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="bg-white p-3 rounded border">
+                                    <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Planned Total Output</label>
+                                    <input id="mpb-output-planned" type="number" step="0.01" min="0" class="w-full p-2 border rounded bg-gray-100 text-sm" readonly placeholder="Auto: sum of pack quantities" title="Auto-calculated">
+                                </div>
+                                <div class="bg-white p-3 rounded border">
+                                    <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Actual Total Output (Optional)</label>
+                                    <input id="mpb-output-actual" type="number" step="0.01" min="0" class="w-full p-2 border rounded text-sm" placeholder="110 (if overage produced)" onchange="updateOverageDisplay();"> 
+                                </div>
+                            </div>
+                            
+                            <!-- Overage Display -->
+                            <div id="mpb-overage-display" class="hidden bg-orange-50 border border-orange-200 rounded p-3">
+                                <p class="text-xs font-bold text-orange-900 mb-1">⚠️ Overage Detected</p>
+                                <p id="mpb-overage-text" class="text-xs text-orange-800"></p>
+                            </div>
+                            
+                            <!-- Step 5: Reference & Notes -->
+                            <div class="bg-white p-3 rounded border">
+                                <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Reference / Batch ID</label>
+                                <input id="mpb-ref" type="text" class="w-full p-2 border rounded text-sm" placeholder="BATCH-001">
+                            </div>
+                            
+                            <!-- Remaining Liquid Location -->
+                            <div class="bg-white p-3 rounded border">
+                                <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Remaining Bulk Liquid Location</label>
+                                <input id="mpb-remaining-location" type="text" class="w-full p-2 border rounded text-sm" placeholder="e.g., Bulk Drum #5, Shelf A">
+                            </div>
+                            
+                            <!-- Summary Preview -->
+                            <div class="bg-white p-3 rounded border">
+                                <label class="block text-xs font-bold text-gray-700 uppercase mb-2">Conversion Summary</label>
+                                <textarea id="mpb-summary-preview" rows="3" class="w-full p-2 border rounded text-xs bg-gray-50" readonly></textarea>
+                            </div>
+                            
+                            <button onclick="executeMultiPackBulkConversion()" class="w-full px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">Execute Multi-Pack Conversion</button>
+                        </div>
+                    </div>
+                    </div>`;
+                    };
                         <!-- HIDDEN SLIP ID STORAGE -->
                         <input type="hidden" id="np-slip-id" value="">
                     </div>
@@ -24997,6 +26087,8 @@
                              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                         </button>
                     </div>
+
+                    ${window.renderPackFromBulkPanel ? window.renderPackFromBulkPanel() : ''}
                 </div>
             </div>
 
@@ -25668,6 +26760,79 @@
                         // 5. Auth Display
                         document.getElementById('np-auth-display').classList.remove('hidden');
                         document.getElementById('np-auth-name').textContent = slip.employee + (slip.approver ? ` (Appr: ${slip.approver})` : '');
+
+                        // 6. Prefill Pack-from-Bulk intent from requisition
+                        if (typeof window.prefillPackFromBulkFromSlip === 'function') {
+                            window.prefillPackFromBulkFromSlip(slip);
+                        }
+                    };
+
+                    window.extractSlipPackIntent = function (slip) {
+                        if (!slip) return { packageType: '', labelMode: 'normal' };
+                        const packageType = String(
+                            slip.packageType || slip.PackageType || slip.package || slip.packagingType || ''
+                        ).trim();
+                        let labelMode = String(
+                            slip.labelMode || slip.LabelMode || slip.labelType || ''
+                        ).trim().toLowerCase();
+                        if (!labelMode) {
+                            const noteSrc = String(slip.notes || slip.Notes || slip.remarks || slip.Remarks || '').toLowerCase();
+                            if (noteSrc.indexOf('white label') >= 0) labelMode = 'white';
+                        }
+                        if (labelMode !== 'white') labelMode = 'normal';
+                        return { packageType, labelMode };
+                    };
+
+                    window.prefillPackFromBulkFromSlip = function (slip) {
+                        const bulkSel = document.getElementById('pfb-bulk-item');
+                        const packSel = document.getElementById('pfb-package-item');
+                        const modeSel = document.getElementById('pfb-label-mode');
+                        if (!bulkSel || !packSel || !modeSel) return;
+
+                        const intent = window.extractSlipPackIntent ? window.extractSlipPackIntent(slip) : { packageType: '', labelMode: 'normal' };
+                        if (intent.labelMode) modeSel.value = intent.labelMode;
+
+                        // Auto-select bulk product from slip/product context.
+                        const rawBulkName = String((slip && (slip.itemName || slip.productName || slip.ProductName)) || '').trim();
+                        let bulkName = rawBulkName;
+                        if (!bulkName) {
+                            const npProduct = document.getElementById('np-product');
+                            if (npProduct && npProduct.value) {
+                                const f = (appState.formulas || []).find(x => String(x.id) === String(npProduct.value));
+                                if (f && f.name) bulkName = String(f.name).trim();
+                            }
+                        }
+                        if (bulkName) {
+                            const target = bulkName.toLowerCase();
+                            let bulkMatchedIndex = -1;
+                            for (let i = 0; i < bulkSel.options.length; i++) {
+                                const opt = bulkSel.options[i];
+                                const txt = String(opt.text || '').toLowerCase();
+                                const nameOnly = txt.split(' (')[0].trim();
+                                if (nameOnly === target || nameOnly.indexOf(target) >= 0 || target.indexOf(nameOnly) >= 0) {
+                                    bulkMatchedIndex = i;
+                                    break;
+                                }
+                            }
+                            if (bulkMatchedIndex >= 0) bulkSel.selectedIndex = bulkMatchedIndex;
+                        }
+
+                        if (intent.packageType) {
+                            const target = intent.packageType.toLowerCase();
+                            let matchedIndex = -1;
+                            for (let i = 0; i < packSel.options.length; i++) {
+                                const txt = String(packSel.options[i].text || '').toLowerCase();
+                                const val = String(packSel.options[i].value || '').toLowerCase();
+                                if (txt.indexOf(target) >= 0 || target.indexOf(txt.split(' (')[0]) >= 0 || val === target) {
+                                    matchedIndex = i;
+                                    break;
+                                }
+                            }
+                            if (matchedIndex >= 0) packSel.selectedIndex = matchedIndex;
+                        }
+
+                        if (typeof window.togglePackLabelInputs === 'function') window.togglePackLabelInputs();
+                        if (typeof window.updatePackVariantPreview === 'function') window.updatePackVariantPreview();
                     };
 
                     // --- CONFIGURATION ---
@@ -25687,6 +26852,8 @@
                         // NEW:
                         const slipId = document.getElementById('np-slip-id').value;
                         const authName = document.getElementById('np-auth-name').textContent;
+                        const selectedSlip = slipId ? (appState.pendingSlips || []).find(s => s.id == slipId) : null;
+                        const slipIntent = window.extractSlipPackIntent ? window.extractSlipPackIntent(selectedSlip) : { packageType: '', labelMode: 'normal' };
 
                         if (!batchNo || !formulaId || !qty) { alert("Please fill all fields."); return; }
 
@@ -25710,6 +26877,8 @@
                             status: 'In Progress',
                             productionSlipId: slipId || null, // USE HIDDEN ID
                             slipEmployee: slipId ? authName : null, // Store Auth Name mainly
+                            requestedPackageType: slipIntent.packageType || '',
+                            requestedLabelMode: slipIntent.labelMode || 'normal',
                             isReserved: true // Always reserved if formula exists
                         };
 
@@ -26123,6 +27292,424 @@
                     // ----------------------------------------------------------------
                     // 3. EDIT & SAVE LOGIC (Re-implemented)
                     // ----------------------------------------------------------------
+                    // ================================================================
+                    // PACK SIZE MATERIAL REQUIREMENTS MANAGEMENT
+                    // ================================================================
+                    window.currentPackReqFormula = {}; // Stores pack requirements for current formula being edited
+                    
+                    window.switchPackReqTab = function(packSize) {
+                        if (!packSize) {
+                            document.getElementById('pack-req-materials-container').innerHTML = '<p class="text-sm text-gray-600">Select a pack size above to add materials</p>';
+                            document.getElementById('add-pack-req-btn').style.display = 'none';
+                            return;
+                        }
+                        
+                        if (!window.currentPackReqFormula) window.currentPackReqFormula = {};
+                        if (!window.currentPackReqFormula[packSize]) window.currentPackReqFormula[packSize] = [];
+                        
+                        const materials = window.currentPackReqFormula[packSize];
+                        let html = '';
+                        
+                        materials.forEach((mat, idx) => {
+                            const item = findItem(mat.category, mat.itemId);
+                            const itemName = item ? item.name : ('Item ' + mat.itemId);
+                            const unit = item ? item.unit : mat.unit;
+                            html += `
+                                <div class="flex gap-2 items-center bg-white p-2 rounded border border-gray-200">
+                                    <span class="text-sm font-medium flex-1">${itemName}</span>
+                                    <span class="text-sm text-gray-600">${mat.quantity} ${unit}</span>
+                                    <button type="button" onclick="removePackReqMaterial('${packSize}', ${idx})" class="text-red-500 hover:text-red-700 font-bold px-2">×</button>
+                                </div>
+                            `;
+                        });
+                        
+                        document.getElementById('pack-req-materials-container').innerHTML = html || '<p class="text-sm text-gray-600">No materials added yet</p>';
+                        document.getElementById('add-pack-req-btn').style.display = 'inline-block';
+                    };
+                    
+                    window.addPackReqMaterial = function() {
+                        const packSize = document.getElementById('pack-req-size-select').value;
+                        if (!packSize) { alert('Select a pack size first'); return; }
+                        
+                        if (!window.currentPackReqFormula[packSize]) window.currentPackReqFormula[packSize] = [];
+                        
+                        // Prompt for material selection
+                        const packMaterials = (appState.inventory.packingMaterials || []).concat(appState.inventory.labels || []);
+                        if (!packMaterials.length) { alert('No packing materials or labels defined'); return; }
+                        
+                        const itemSelect = prompt('Enter material ID (or select from list):\n' + packMaterials.map(m => `${m.id}: ${m.name}`).join('\n'));
+                        if (!itemSelect) return;
+                        
+                        const itemId = isNaN(itemSelect) ? packMaterials.find(m => String(m.name).toLowerCase() === String(itemSelect).toLowerCase())?.id : parseInt(itemSelect);
+                        if (!itemId) { alert('Material not found'); return; }
+                        
+                        const item = packMaterials.find(m => m.id == itemId);
+                        const quantity = prompt(`Enter quantity for ${item?.name || itemId}:`);
+                        if (!quantity || isNaN(quantity)) return;
+                        
+                        window.currentPackReqFormula[packSize].push({
+                            itemId: itemId,
+                            quantity: parseFloat(quantity),
+                            unit: item?.unit || 'Unit',
+                            category: (appState.inventory.packingMaterials || []).find(m => m.id == itemId) ? 'packingMaterials' : 'labels'
+                        });
+                        
+                        window.switchPackReqTab(packSize);
+                        updatePackReqSummary();
+                    };
+                    
+                    window.removePackReqMaterial = function(packSize, index) {
+                        if (window.currentPackReqFormula[packSize]) {
+                            window.currentPackReqFormula[packSize].splice(index, 1);
+                            window.switchPackReqTab(packSize);
+                            updatePackReqSummary();
+                        }
+                    };
+                    
+                    window.updatePackReqSummary = function() {
+                        const summary = document.getElementById('pack-req-summary');
+                        const packSizes = Object.keys(window.currentPackReqFormula || {}).filter(k => window.currentPackReqFormula[k].length > 0);
+                        if (packSizes.length === 0) {
+                            summary.innerHTML = '<strong>No pack sizes configured yet</strong>';
+                        } else {
+                            summary.innerHTML = '<strong>Configured pack sizes:</strong> <br>' + packSizes.map(ps => {
+                                const count = window.currentPackReqFormula[ps].length;
+                                return `${ps} (${count} material${count > 1 ? 's' : ''})`;
+                            }).join(' | ');
+                        }
+                    };
+
+                    window.currentUniversalPackDetails = {};
+                    window.currentUniversalPackSizeTab = '';
+
+                    window.injectUniversalPackDefaultsModal = function () {
+                        if (document.getElementById('universalPackDefaultsModal')) return;
+                        const modalHTML = `
+        <div id="universalPackDefaultsModal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center z-50 hidden">
+            <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <h3 class="text-xl font-bold text-amber-800">Universal Pack Defaults</h3>
+                        <p class="text-xs text-gray-500 mt-1">Used automatically only when a product formula has no pack-size-specific packing details.</p>
+                    </div>
+                    <button onclick="closeModal('universalPackDefaultsModal')" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                </div>
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm text-amber-900">
+                    Maintain shared pack-size defaults here. Example for 1L: bottle, carton, tape, label. Employees will see these automatically when the selected formula does not define that pack size.
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-900">
+                    Enter material rules as <strong>Qty for every N packs</strong>. Use <strong>Exact</strong> for per-pack items and <strong>Round Up</strong> for grouped items like cartons, tape, strapping belt. Example for <strong>100ml</strong>: Bottle = 1 for every 1 pack (Exact), Box = 1 for every 10 packs (Round Up), Strapping Belt = 2 for every 10 packs (Round Up).
+                </div>
+                <!-- Configured pack sizes overview chips -->
+                <div class="mb-4">
+                    <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Configured Pack Sizes <span class="font-normal normal-case text-gray-400">(click to edit &nbsp;·&nbsp; &times; to delete)</span></div>
+                    <div id="upd-configured-bar" class="flex flex-wrap gap-2 min-h-[36px] bg-gray-50 rounded-lg p-2 border border-gray-100">
+                        <span class="text-sm text-gray-400 italic">No pack sizes configured yet. Add one below.</span>
+                    </div>
+                </div>
+                <hr class="mb-4 border-gray-200">
+                <!-- Select or add new pack size -->
+                <div class="mb-4">
+                    <label class="text-sm font-medium text-gray-700 mb-2 block">Select Pack Size to Edit</label>
+                    <div class="flex gap-2 flex-wrap">
+                        <select id="universal-pack-size-select" class="flex-1 min-w-[150px] p-2 border rounded-md bg-white" onchange="switchUniversalPackTab(this.value)">
+                            <option value="">-- Select Pack Size --</option>
+                            <option value="100ml">100ml</option>
+                            <option value="250ml">250ml</option>
+                            <option value="500ml">500ml</option>
+                            <option value="1L">1L</option>
+                            <option value="5L">5L</option>
+                            <option value="10L">10L</option>
+                            <option value="250gm">250gm</option>
+                            <option value="500gm">500gm</option>
+                            <option value="1kg">1kg</option>
+                            <option value="2kg">2kg</option>
+                            <option value="5kg">5kg</option>
+                            <option value="Bulk">Bulk</option>
+                        </select>
+                        <input type="text" id="custom-pack-size-input" placeholder="Custom e.g. 750ml, 3kg" class="flex-1 min-w-[130px] p-2 border rounded-md text-sm bg-white">
+                        <button type="button" onclick="addCustomPackSize()" class="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded-md font-medium whitespace-nowrap">+ New Size</button>
+                    </div>
+                </div>
+                <!-- Editor panel: shown when a pack size is active -->
+                <div id="upd-editor-section" class="border-2 border-amber-200 rounded-lg p-4 mb-4 hidden">
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 id="upd-editor-title" class="font-semibold text-amber-900">Materials for &mdash;</h4>
+                        <button type="button" onclick="deleteCurrentUniversalPackSize()" class="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 rounded-md px-2 py-1">&times; Delete this size</button>
+                    </div>
+                    <p class="text-xs text-gray-600 mb-2">Set quantity rule for this pack size: <strong>Qty for every N packs</strong>, then choose <strong>Exact</strong> or <strong>Round Up</strong>.</p>
+                    <div id="universal-pack-materials-container" class="flex flex-col gap-2 mb-3"></div>
+                    <button type="button" onclick="addUniversalPackMaterialRow()" class="w-full py-2 border-2 border-dashed border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold rounded-lg text-sm transition-colors">+ Add Material Row</button>
+                </div>
+                <div id="universal-pack-summary" class="text-xs text-gray-600 bg-gray-50 rounded p-2 mb-2"></div>
+                <div class="flex justify-end gap-4 pt-4 mt-2 border-t">
+                    <button type="button" onclick="closeModal('universalPackDefaultsModal')" class="px-4 py-2 bg-gray-300 rounded-lg">Cancel</button>
+                    <button type="button" onclick="saveUniversalPackDefaults()" class="px-4 py-2 bg-amber-600 text-white rounded-lg">Save Universal Defaults</button>
+                </div>
+            </div>
+        </div>`;
+                        document.body.insertAdjacentHTML('beforeend', modalHTML);
+                    };
+
+                    window.buildUniversalPackItemOptions = function (selectedItemId) {
+                        const packingItems = (appState.inventory.packingMaterials || []).map(item => ({ id: item.id, name: item.name, unit: item.unit || '', category: 'packingMaterials' }));
+                        const labelItems = (appState.inventory.labels || []).map(item => ({ id: item.id, name: item.name, unit: item.unit || '', category: 'labels' }));
+                        return packingItems.concat(labelItems)
+                            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+                            .map(item => {
+                                const selected = String(selectedItemId) === String(item.id) ? 'selected' : '';
+                                const tag = item.category === 'labels' ? 'Label' : 'Packing';
+                                return `<option value="${item.id}" data-category="${item.category}" data-unit="${item.unit}" ${selected}>[${tag}] ${item.name}</option>`;
+                            }).join('');
+                    };
+
+                    window.renderUniversalPackRows = function (packSize) {
+                        const container = document.getElementById('universal-pack-materials-container');
+                        if (!container) return;
+                        const rows = (window.currentUniversalPackDetails && window.currentUniversalPackDetails[packSize]) ? window.currentUniversalPackDetails[packSize] : [];
+                        container.innerHTML = '';
+                        if (!rows.length) {
+                            container.innerHTML = '<p class="text-sm text-gray-600">No universal defaults added for this pack size yet.</p>';
+                            return;
+                        }
+                        rows.forEach((entry, index) => {
+                            const row = document.createElement('div');
+                            row.className = 'flex gap-2 items-center bg-white p-2 rounded border border-gray-200';
+                            row.dataset.rowIndex = String(index);
+                            row.innerHTML = `
+                                <select class="universal-pack-item-select p-2 border rounded-md flex-1 text-sm bg-gray-50">
+                                    <option value="">-- Select Material --</option>
+                                    ${window.buildUniversalPackItemOptions(entry.itemId)}
+                                </select>
+                                <input type="number" step="any" class="universal-pack-item-qty w-24 p-2 border rounded-md text-right font-bold" placeholder="Qty" value="${entry.quantity || ''}">
+                                <span class="text-xs text-gray-500">for every</span>
+                                <input type="number" step="any" class="universal-pack-coverage w-20 p-2 border rounded-md text-right" placeholder="1" value="${entry.coverageQty || entry.coveragePacks || 1}">
+                                <span class="text-xs text-gray-500">packs</span>
+                                <select class="universal-pack-rounding w-24 p-2 border rounded-md text-xs bg-white">
+                                    <option value="exact" ${(String(entry.roundingMode || 'exact') === 'exact') ? 'selected' : ''}>Exact</option>
+                                    <option value="ceil" ${(String(entry.roundingMode || '') === 'ceil') ? 'selected' : ''}>Round Up</option>
+                                </select>
+                                <span class="universal-pack-item-unit text-xs text-gray-500 w-12 text-center">${entry.unit || ''}</span>
+                                <button type="button" onclick="removeUniversalPackMaterial('${packSize}', ${index})" class="text-red-500 hover:text-red-700 font-bold px-2">&times;</button>
+                            `;
+                            const select = row.querySelector('.universal-pack-item-select');
+                            select.onchange = function () {
+                                const opt = this.options[this.selectedIndex];
+                                row.querySelector('.universal-pack-item-unit').textContent = opt && opt.dataset.unit ? opt.dataset.unit : '';
+                            };
+                            container.appendChild(row);
+                        });
+                    };
+
+                    window.persistUniversalPackTab = function () {
+                        const packSize = window.currentUniversalPackSizeTab;
+                        if (!packSize) return;
+                        const container = document.getElementById('universal-pack-materials-container');
+                        if (!container) return;
+                        const list = [];
+                        container.querySelectorAll('[data-row-index]').forEach(row => {
+                            const select = row.querySelector('.universal-pack-item-select');
+                            const qtyInput = row.querySelector('.universal-pack-item-qty');
+                            const coverageInput = row.querySelector('.universal-pack-coverage');
+                            const roundingSelect = row.querySelector('.universal-pack-rounding');
+                            if (!select) return;
+                            const opt = select.options[select.selectedIndex];
+                            // Keep ALL rows including partial ones so Add/Remove re-renders don't lose user input
+                            list.push({
+                                itemId: select.value || '',
+                                category: opt && opt.dataset.category ? opt.dataset.category : 'packingMaterials',
+                                quantity: qtyInput ? (parseFloat(qtyInput.value) || '') : '',
+                                coverageQty: coverageInput ? (parseFloat(coverageInput.value) || 1) : 1,
+                                roundingMode: roundingSelect ? (roundingSelect.value || 'exact') : 'exact',
+                                unit: opt && opt.dataset.unit ? opt.dataset.unit : ''
+                            });
+                        });
+                        window.currentUniversalPackDetails[packSize] = list;
+                    };
+
+                    window.switchUniversalPackTab = function (packSize) {
+                        if (window.currentUniversalPackSizeTab) window.persistUniversalPackTab();
+                        window.currentUniversalPackSizeTab = packSize || '';
+                        var editor = document.getElementById('upd-editor-section');
+                        var editorTitle = document.getElementById('upd-editor-title');
+                        var sel = document.getElementById('universal-pack-size-select');
+                        if (!packSize) {
+                            if (editor) editor.classList.add('hidden');
+                            if (sel) sel.value = '';
+                            renderConfiguredPackSizesBar();
+                            updateUniversalPackSummary();
+                            return;
+                        }
+                        if (!window.currentUniversalPackDetails[packSize]) window.currentUniversalPackDetails[packSize] = [];
+                        // Ensure this size exists in the dropdown (handles custom sizes)
+                        if (sel) {
+                            var found = false;
+                            for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === packSize) { found = true; break; } }
+                            if (!found) { var opt = document.createElement('option'); opt.value = packSize; opt.textContent = packSize; sel.appendChild(opt); }
+                            sel.value = packSize;
+                        }
+                        if (editor) editor.classList.remove('hidden');
+                        if (editorTitle) editorTitle.textContent = 'Materials for "' + packSize + '" (Qty for every N packs)';
+                        window.renderUniversalPackRows(packSize);
+                        renderConfiguredPackSizesBar();
+                        updateUniversalPackSummary();
+                    };
+
+                    window.addUniversalPackMaterialRow = function () {
+                        const packSize = window.currentUniversalPackSizeTab;
+                        if (!packSize) { alert('Select a pack size first.'); return; }
+                        // Persist current DOM state FIRST so existing selections are not lost on re-render
+                        window.persistUniversalPackTab();
+                        if (!window.currentUniversalPackDetails[packSize]) window.currentUniversalPackDetails[packSize] = [];
+                        window.currentUniversalPackDetails[packSize].push({ itemId: '', category: 'packingMaterials', quantity: '', coverageQty: 1, roundingMode: 'exact', unit: '' });
+                        window.renderUniversalPackRows(packSize);
+                        updateUniversalPackSummary();
+                    };
+
+                    window.removeUniversalPackMaterial = function (packSize, index) {
+                        if (!window.currentUniversalPackDetails[packSize]) return;
+                        // Persist current DOM state FIRST so other rows' selections are not lost on re-render
+                        window.persistUniversalPackTab();
+                        window.currentUniversalPackDetails[packSize].splice(index, 1);
+                        window.renderUniversalPackRows(packSize);
+                        updateUniversalPackSummary();
+                    };
+
+                    window.addCustomPackSize = function () {
+                        const input = document.getElementById('custom-pack-size-input');
+                        const customSize = (input ? input.value : '').trim();
+                        if (!customSize) { alert('Enter a pack size name first (e.g. 750ml, 2L, 3kg).'); return; }
+                        const select = document.getElementById('universal-pack-size-select');
+                        if (!select) return;
+                        // Check if it already exists in the dropdown
+                        for (let i = 0; i < select.options.length; i++) {
+                            if (select.options[i].value === customSize) {
+                                select.value = customSize;
+                                window.switchUniversalPackTab(customSize);
+                                if (input) input.value = '';
+                                return;
+                            }
+                        }
+                        // Add the new option to the dropdown
+                        const newOpt = document.createElement('option');
+                        newOpt.value = customSize;
+                        newOpt.textContent = customSize;
+                        select.appendChild(newOpt);
+                        select.value = customSize;
+                        window.switchUniversalPackTab(customSize);
+                        if (input) input.value = '';
+                    };
+
+                    window.renderConfiguredPackSizesBar = function () {
+                        var bar = document.getElementById('upd-configured-bar');
+                        if (!bar) return;
+                        var packSizes = Object.keys(window.currentUniversalPackDetails || {}).filter(function (ps) {
+                            return (window.currentUniversalPackDetails[ps] || []).some(function (e) { return e.itemId; });
+                        });
+                        if (!packSizes.length) {
+                            bar.innerHTML = '<span class="text-sm text-gray-400 italic">No pack sizes configured yet. Add one below.</span>';
+                            return;
+                        }
+                        bar.innerHTML = packSizes.map(function (ps) {
+                            var count = (window.currentUniversalPackDetails[ps] || []).filter(function (e) { return e.itemId; }).length;
+                            var isActive = ps === window.currentUniversalPackSizeTab;
+                            var cls = isActive
+                                ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                                : 'bg-white text-amber-700 border-amber-400 hover:bg-amber-50';
+                            return '<span class="inline-flex items-center gap-1 px-3 py-1 rounded-full border text-xs font-medium cursor-pointer ' + cls + '" onclick="switchUniversalPackTab(\'' + ps + '\')" title="Click to edit ' + ps + '">' +
+                                ps + ' <span class="rounded-full bg-black bg-opacity-10 px-1.5">' + count + '</span>' +
+                                '<span onclick="event.stopPropagation(); quickDeleteUniversalPackSize(\'' + ps + '\')" class="ml-1 font-bold text-base leading-none hover:opacity-60" title="Delete ' + ps + '">&times;</span>' +
+                                '</span>';
+                        }).join('');
+                    };
+
+                    window.deleteCurrentUniversalPackSize = function () {
+                        var ps = window.currentUniversalPackSizeTab;
+                        if (!ps) return;
+                        if (!confirm('Delete ALL materials for "' + ps + '"? This cannot be undone.')) return;
+                        delete window.currentUniversalPackDetails[ps];
+                        window.currentUniversalPackSizeTab = '';
+                        var editor = document.getElementById('upd-editor-section');
+                        if (editor) editor.classList.add('hidden');
+                        var sel = document.getElementById('universal-pack-size-select');
+                        if (sel) sel.value = '';
+                        renderConfiguredPackSizesBar();
+                        updateUniversalPackSummary();
+                    };
+
+                    window.quickDeleteUniversalPackSize = function (ps) {
+                        if (!confirm('Delete ALL materials for "' + ps + '"?')) return;
+                        delete window.currentUniversalPackDetails[ps];
+                        if (window.currentUniversalPackSizeTab === ps) {
+                            window.currentUniversalPackSizeTab = '';
+                            var editor = document.getElementById('upd-editor-section');
+                            if (editor) editor.classList.add('hidden');
+                            var sel = document.getElementById('universal-pack-size-select');
+                            if (sel) sel.value = '';
+                        }
+                        renderConfiguredPackSizesBar();
+                        updateUniversalPackSummary();
+                    };
+
+                    window.updateUniversalPackSummary = function () {
+                        var summary = document.getElementById('universal-pack-summary');
+                        if (!summary) return;
+                        var packSizes = Object.keys(window.currentUniversalPackDetails || {}).filter(function (ps) {
+                            return (window.currentUniversalPackDetails[ps] || []).some(function (e) { return e.itemId; });
+                        });
+                        if (!packSizes.length) {
+                            summary.innerHTML = '<strong>No universal defaults configured.</strong>';
+                        } else {
+                            summary.innerHTML = '<strong>Saved:</strong> ' + packSizes.map(function (ps) {
+                                var c = (window.currentUniversalPackDetails[ps] || []).filter(function (e) { return e.itemId; }).length;
+                                return ps + ' (' + c + ' materials)';
+                            }).join(' &nbsp;|&nbsp; ');
+                        }
+                        if (typeof renderConfiguredPackSizesBar === 'function') renderConfiguredPackSizesBar();
+                    };
+
+                    window.openUniversalPackDefaultsModal = function () {
+                        window.injectUniversalPackDefaultsModal();
+                        window.currentUniversalPackDetails = JSON.parse(JSON.stringify(appState.universalPackDetails || {}));
+                        window.currentUniversalPackSizeTab = '';
+                        var sel = document.getElementById('universal-pack-size-select');
+                        if (sel) sel.value = '';
+                        var editor = document.getElementById('upd-editor-section');
+                        if (editor) editor.classList.add('hidden');
+                        renderConfiguredPackSizesBar();
+                        updateUniversalPackSummary();
+                        openModal('universalPackDefaultsModal');
+                    };
+
+                    window.saveUniversalPackDefaults = function () {
+                        if (window.currentUniversalPackSizeTab) window.persistUniversalPackTab();
+                        // On save: only persist complete entries (both itemId and quantity filled)
+                        const cleanDetails = {};
+                        Object.keys(window.currentUniversalPackDetails || {}).forEach(function (ps) {
+                            const valid = (window.currentUniversalPackDetails[ps] || []).filter(function (e) {
+                                return e.itemId && e.quantity > 0;
+                            });
+                            if (valid.length > 0) cleanDetails[ps] = valid;
+                        });
+                        appState.universalPackDetails = cleanDetails;
+                        saveState();
+                        closeModal('universalPackDefaultsModal');
+                        if (window.showToast) showToast('Universal pack defaults saved.', 'success');
+
+                        // Sync policy:
+                        // 1) Auto-sync ON  -> normal full sync as usual.
+                        // 2) Auto-sync OFF -> sync ONLY universal pack defaults.
+                        if (autoSyncEnabled) {
+                            if (typeof syncToCloud === 'function' && (useFirebase || cloudApiUrl)) {
+                                setTimeout(function () { syncToCloud(true); }, 200);
+                            }
+                        } else {
+                            if (typeof syncUniversalPackDefaultsOnly === 'function') {
+                                setTimeout(function () { syncUniversalPackDefaultsOnly(); }, 200);
+                            }
+                        }
+                    };
+
                     window.openFormulaModal = function (formulaId = null) {
                         // Ensure Modal Exists
                         const modal = document.getElementById('formulaModal');
@@ -26131,9 +27718,16 @@
                         // Clean Reset
                         document.getElementById('formula-form').reset();
                         document.getElementById('ingredients-container').innerHTML = '<h4 class="font-medium text-gray-800 mt-4">Raw Materials</h4>';
-                        document.getElementById('packing-container').innerHTML = '<h4 class="font-medium text-gray-800 mt-4">Packing Materials</h4>';
-                        document.getElementById('labels-container').innerHTML = '<h4 class="font-medium text-gray-800 mt-4">Labels</h4>';
+                        document.getElementById('packing-container').innerHTML = '<h4 class="font-medium text-gray-800 mt-4">Packing Materials (Generic)</h4><p class="text-xs text-gray-500 mb-2">Leave empty if using pack-size specific requirements</p>';
+                        document.getElementById('labels-container').innerHTML = '<h4 class="font-medium text-gray-800 mt-4">Labels (Generic)</h4><p class="text-xs text-gray-500 mb-2">Leave empty if using pack-size specific requirements</p>';
                         document.getElementById('edit-formula-id').value = '';
+                        
+                        // Reset pack size requirements
+                        window.currentPackReqFormula = {};
+                        document.getElementById('pack-req-size-select').value = '';
+                        document.getElementById('pack-req-materials-container').innerHTML = '<p class="text-sm text-gray-600">Select a pack size to add materials</p>';
+                        document.getElementById('add-pack-req-btn').style.display = 'none';
+                        updatePackReqSummary();
 
                         document.getElementById('formula-modal-title').textContent = formulaId ? "Edit Formula" : "Add New Product Formula";
 
@@ -26151,6 +27745,12 @@
                             if (formula.ingredients) formula.ingredients.forEach(i => add(i, 'ingredients-container', 'Raw'));
                             if (formula.packingMaterials) formula.packingMaterials.forEach(i => add(i, 'packing-container', 'Packing'));
                             if (formula.labels) formula.labels.forEach(i => add(i, 'labels-container', 'Label'));
+                            
+                            // Load pack size requirements
+                            if (formula.packingRequirements) {
+                                window.currentPackReqFormula = JSON.parse(JSON.stringify(formula.packingRequirements));
+                                updatePackReqSummary();
+                            }
                         }
 
                         modal.classList.remove('hidden');
@@ -26240,6 +27840,10 @@
                     <p class="text-sm text-gray-500 mt-1">${(appState.formulas || []).length} formulas available</p>
                 </div>
                 <div class="flex gap-3">
+                    <button onclick="if(window.openUniversalPackDefaultsModal) openUniversalPackDefaultsModal()" class="px-4 py-2 bg-amber-600 text-white rounded-lg shadow hover:bg-amber-700 font-bold flex items-center gap-2 transition-transform hover:scale-105">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h16"></path></svg>
+                        Universal Pack Defaults
+                    </button>
                     <button onclick="if(window.exportFormulasCsvForImport_v13) exportFormulasCsvForImport_v13()" class="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 font-bold flex items-center gap-2 transition-transform hover:scale-105">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                         Export CSV
@@ -26355,6 +27959,9 @@
                                 const ingredients = harvest('ingredients-container');
                                 const packing = harvest('packing-container');
                                 const labels = harvest('labels-container');
+                                
+                                // Get pack size material requirements
+                                const packingRequirements = window.currentPackReqFormula || {};
 
                                 if (id) {
                                     const f = appState.formulas.find(x => x.id == id);
@@ -26365,6 +27972,7 @@
                                         f.ingredients = ingredients;
                                         f.packingMaterials = packing;
                                         f.labels = labels;
+                                        f.packingRequirements = packingRequirements;
                                     }
                                 } else {
                                     const newF = {
@@ -26374,7 +27982,8 @@
                                         outputUnit: outUnit,
                                         ingredients: ingredients,
                                         packingMaterials: packing,
-                                        labels: labels
+                                        labels: labels,
+                                        packingRequirements: packingRequirements
                                     };
                                     if (!appState.formulas) appState.formulas = [];
                                     appState.formulas.push(newF);
@@ -26391,6 +28000,7 @@
 
                     // Auto-Init
                     window.injectImportFormulaModal_v13();
+                    if (window.injectUniversalPackDefaultsModal) window.injectUniversalPackDefaultsModal();
 
                     console.log("ANTIGRAVITY: Feature Pack V13 (Namespace Fix) Applied.");
             </script>
