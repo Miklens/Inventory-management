@@ -2013,7 +2013,7 @@
 
   async function getStageCounts() {
     var all = await getCollectionArray('Requisitions_V2');
-    var counts = { PENDING_ISSUE: 0, WIP: 0, DISPATCH: 0, PENDING_RECORD: 0, PENDING_APPROVALS: 0, PARTIAL_ISSUE: 0, PENDING_DISPATCH_APPROVALS: 0, FORMULA_REQUESTS: 0, OVERDUE: 0, TODAY_ISSUED: 0 };
+    var counts = { PENDING_ISSUE: 0, WIP: 0, DISPATCH: 0, PENDING_RECORD: 0, PENDING_APPROVALS: 0, PARTIAL_ISSUE: 0, PENDING_DISPATCH_APPROVALS: 0, FORMULA_REQUESTS: 0, OVERDUE: 0, TODAY_ISSUED: 0, STOCK_ADJ: 0 };
     var now = Date.now();
     var oneDayMs = 24 * 60 * 60 * 1000;
     var overdueThresholdMs = 3 * oneDayMs; // 3 days
@@ -2023,13 +2023,15 @@
     all.forEach(function (r) {
       var status = (r.Status || r.status || '').toUpperCase();
       var cur = (r.CurrentStage || r.currentStage || '').toUpperCase();
+      var typ = String(r.Type || r.type || '').toUpperCase();
       var created = r.CreatedDate || r.date || '';
       var createdMs = created ? new Date(created).getTime() : 0;
       var isPendingApproval = (cur.indexOf('PENDING MANAGER APPROVAL') >= 0 && (status === 'SUBMITTED' || status === 'PENDING')) || (status === 'ISSUED_PENDING_APPROVAL' && cur.indexOf('STORE ISSUED') >= 0) || (status === 'CORRECTION_REQUIRED' && cur.indexOf('RE-APPROVAL') >= 0);
       var isPendingIssue = cur.indexOf('AWAITING MATERIAL ISSUE') >= 0 || cur.indexOf('PENDING STORE') >= 0 || (status === 'APPROVED' && cur.indexOf('AWAITING') >= 0) || status === 'PARTIALLY_ISSUED';
+      var isWip = (typ.indexOf('RESEARCH') < 0) && (cur.indexOf('MANUFACTURING') >= 0 || cur.indexOf('WIP') >= 0 || cur.indexOf('MATERIAL ISSUED') >= 0 || cur === 'PAUSED');
       if (isPendingApproval) counts.PENDING_APPROVALS++;
       if (isPendingIssue) counts.PENDING_ISSUE++;
-      if (cur.indexOf('MANUFACTURING') >= 0 || cur.indexOf('WIP') >= 0 || cur === 'PAUSED') counts.WIP++;
+      if (isWip) counts.WIP++;
       if (cur.indexOf('AWAITING DISPATCH') >= 0 || status === 'PRODUCED') counts.DISPATCH++;
       if (cur.indexOf('AWAITING PRODUCTION RECORDING') >= 0) counts.PENDING_RECORD++;
       if (status === 'PARTIALLY_ISSUED') counts.PARTIAL_ISSUE++;
@@ -2048,6 +2050,10 @@
     var formulaSnap = await db.collection('FormulaRequests').get();
     formulaSnap.forEach(function (d) {
       if ((d.data().Status || '').toLowerCase() === 'pending') counts.FORMULA_REQUESTS++;
+    });
+    var sarSnap = await db.collection('StockAdjustmentRequests').get();
+    sarSnap.forEach(function (d) {
+      if ((d.data().Status || '').toLowerCase() === 'pending') counts.STOCK_ADJ++;
     });
     return ok({ counts: counts });
   }
@@ -3592,10 +3598,102 @@
         quantity: parseFloat(p.quantity) || 0,
         unit: p.unit || '',
         RequestedBy: p.user || '',
+        RequestedByEmail: (p.email || '').toLowerCase().trim(),
         RequestedAt: new Date().toISOString(),
         Status: 'Pending'
       });
-      return ok({ message: 'Request submitted' });
+      await pushNotificationQueue('stock_count_requested', {
+        sarId: id,
+        itemName: p.itemName || '',
+        physicalQty: parseFloat(p.quantity) || 0,
+        unit: p.unit || '',
+        requestedBy: p.user || '',
+        requestedByEmail: (p.email || '').toLowerCase().trim(),
+        requisitionId: p.requisitionId || ''
+      });
+      return ok({ message: 'Request submitted', sarId: id });
+    },
+    approve_stock_adjustment_request: async function (p) {
+      var sarId = p.sarId || p.requestId;
+      if (!sarId) return fail(new Error('No sarId'));
+      var sarRef = db.collection('StockAdjustmentRequests').doc(String(sarId).replace(/\//g, '_'));
+      var sarSnap = await sarRef.get();
+      if (!sarSnap.exists) return fail(new Error('Request not found'));
+      var sar = sarSnap.data();
+      var action = (p.action || 'approve').toLowerCase();
+      var isApprove = action === 'approve';
+      // Update SAR status.
+      await sarRef.update({
+        Status: isApprove ? 'Approved' : 'Rejected',
+        ReviewedBy: p.user || '',
+        ReviewedAt: new Date().toISOString()
+      });
+      if (isApprove) {
+        // Auto-update inventory: set item quantity to physical count.
+        var latestRef = db.collection('Database').doc('latest');
+        var dbSnap = await latestRef.get();
+        if (!dbSnap.exists) return fail(new Error('No inventory data found'));
+        var d = dbSnap.data();
+        var currentVersion = (d.latestId || '').toString();
+        var payload = (d.data != null) ? d.data : d;
+        var inv = (payload && payload.inventory) ? payload.inventory : payload;
+        var itemName = (sar.itemName || '').toString().trim();
+        var itemId = (sar.itemId || '').toString().trim();
+        var newQty = parseFloat(sar.quantity) || 0;
+        var updated = false;
+        var categories = ['rawMaterials', 'packingMaterials', 'labels'];
+        for (var ci = 0; ci < categories.length; ci++) {
+          var cat = categories[ci];
+          var arr = inv[cat];
+          if (!Array.isArray(arr)) continue;
+          for (var ai = 0; ai < arr.length; ai++) {
+            var item = arr[ai];
+            var nameMatch = itemName && (String(item.name || '') === itemName || String(item.itemName || '') === itemName);
+            var idMatch = itemId && (String(item.id || '') === itemId || String(item.itemId || '') === itemId);
+            if (nameMatch || idMatch) {
+              var oldQty = parseFloat(item.quantity || item.qty || 0) || 0;
+              item.quantity = item.qty = newQty;
+              if (!Array.isArray(payload.transactions)) payload.transactions = [];
+              payload.transactions.push({
+                id: Date.now().toString() + '-sc',
+                itemId: item.id || item.itemId || itemId || itemName,
+                itemName: item.name || item.itemName || itemName,
+                category: cat,
+                type: 'stock-count-adjustment',
+                quantity: newQty - oldQty,
+                previousQty: oldQty,
+                newQty: newQty,
+                date: new Date().toISOString().split('T')[0] + 'T00:00:00.000Z',
+                sarId: sarId,
+                approvedBy: p.user || ''
+              });
+              updated = true;
+              break;
+            }
+          }
+          if (updated) break;
+        }
+        if (!updated) return fail(new Error('Item "' + itemName + '" not found in inventory. Update manually in Main Inventory.'));
+        var saveRes = await saveInventory(payload, currentVersion);
+        if (saveRes.result === 'error' || (saveRes.status && saveRes.status !== 'success')) {
+          return fail(new Error(saveRes.error || 'Inventory save failed'));
+        }
+      }
+      // Notify store incharge.
+      await pushNotificationQueue(isApprove ? 'stock_count_approved' : 'stock_count_rejected', {
+        sarId: sarId,
+        itemName: sar.itemName || '',
+        physicalQty: sar.quantity,
+        unit: sar.unit || '',
+        requestedByEmail: sar.RequestedByEmail || '',
+        requestedBy: sar.RequestedBy || '',
+        reviewedBy: p.user || '',
+        requisitionId: sar.requisitionId || ''
+      });
+      return ok({
+        updated: isApprove,
+        message: isApprove ? 'Approved & inventory updated to ' + sar.quantity + ' ' + sar.unit : 'Rejected'
+      });
     },
     submit_formula_request: async function (p) {
       var id = 'FR-' + Date.now();
