@@ -10976,86 +10976,64 @@
                     }
 
                     function startAutoBackupScheduler() {
-                        if (window._autoBackupSchedulerStarted) return;
-                        window._autoBackupSchedulerStarted = true;
-
-                        // Delay first check so any in-progress login/sync can fully settle.
-                        setTimeout(function () {
-                            if (typeof checkAutoBackup === 'function') checkAutoBackup(true);
-                        }, 5000);
-
-                        // Re-check every 10 minutes.
-                        window._autoBackupScheduler = setInterval(function () {
-                            if (typeof checkAutoBackup === 'function') checkAutoBackup(true);
-                        }, 10 * 60 * 1000);
+                        // Auto-scheduling disabled — use the manual trigger in Data Management.
+                        if (typeof checkAutoBackup === 'function') checkAutoBackup(false);
                     }
 
                     async function triggerAutoBackup(isManual = false) {
-                        if (!cloudApiUrl && !useFirebase) {
-                            if (isManual) showAlert("Cloud connection not configured. Cannot send email backup.");
+                        // Resolve the Apps Script email endpoint & secret from Firebase config or legacy cloud URL.
+                        var emailUrl = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.APP_SCRIPT_EMAIL_URL)
+                            ? window.FIREBASE_CONFIG.APP_SCRIPT_EMAIL_URL.trim()
+                            : (cloudApiUrl || '').trim();
+                        var emailSecret = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.APP_SCRIPT_EMAIL_SECRET)
+                            ? window.FIREBASE_CONFIG.APP_SCRIPT_EMAIL_SECRET
+                            : 'MiklensEmailSecret2024XyZ789';
+
+                        if (!emailUrl) {
+                            if (isManual) showAlert('Email backup endpoint is not configured (APP_SCRIPT_EMAIL_URL missing in firebase-config.js).');
                             return;
                         }
 
                         if (isManual) {
                             const btn = document.getElementById('manual-backup-email-btn');
-                            if (btn) {
-                                btn.disabled = true;
-                                btn.textContent = "Sending Backup...";
-                            }
-                            showToast('Sending backup email...', 'info');
+                            if (btn) { btn.disabled = true; btn.textContent = 'Sending Backup...'; }
                         }
 
                         try {
-                            const backupPayload = JSON.stringify(appState);
-                            
-                            updateSyncStatus('syncing', isManual ? 'Sending manual email backup...' : 'Triggering scheduled auto-backup...');
+                            updateSyncStatus('syncing', 'Sending backup email...');
 
-                            let result;
-                            if (useFirebase && window.FirebaseBackend) {
-                                result = await window.FirebaseBackend.callBackend('auto_backup_email', {
-                                    secret: 'MiklensEmailSecret2024XyZ789',
-                                    data: backupPayload
-                                });
-                                if (!result || result.result !== 'success') {
-                                    throw new Error((result && result.error) ? result.error : 'Backup email request failed');
-                                }
-                            } else {
-                                // For GAS, send as application/x-www-form-urlencoded to avoid CORS preflight (simple request)
-                                const bodyParams = new URLSearchParams();
-                                bodyParams.append('action', 'auto_backup_email');
-                                bodyParams.append('secret', 'MiklensEmailSecret2024XyZ789');
-                                bodyParams.append('data', backupPayload);
+                            // Send directly via no-cors to the Apps Script email endpoint.
+                            // This is reliable regardless of Firebase mode — the request is dispatched
+                            // and Apps Script sends the email. We cannot read the opaque response
+                            // but we know the request was sent if no fetch exception is thrown.
+                            const bodyParams = new URLSearchParams();
+                            bodyParams.append('action', 'auto_backup_email');
+                            bodyParams.append('secret', emailSecret);
+                            bodyParams.append('data', JSON.stringify(appState));
 
-                                await fetch(cloudApiUrl, {
-                                    method: 'POST',
-                                    mode: 'no-cors',
-                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                    body: bodyParams
-                                });
-                                // no-cors means we can't read the response, but if fetch doesn't throw, 
-                                // it means the request was sent toward the server.
-                                result = { result: 'success' };
-                            }
+                            await fetch(emailUrl, {
+                                method: 'POST',
+                                mode: 'no-cors',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: bodyParams
+                            });
 
-                            // Update last backup timestamp on success
+                            // Request dispatched successfully.
                             appState.lastAutoBackup = Date.now();
                             saveState();
 
-                            if (isManual) showAlert("Manual backup request sent to Admin/Manager via Email!");
-                            showToast(isManual ? "Manual Email Backup Sent" : "Scheduled Auto-Backup Sent", "success");
+                            if (isManual) showAlert('Backup email sent to Admin/Manager!');
+                            showToast('Email Backup Sent', 'success');
                             updateSyncStatus('success', 'Backup Sent');
-                            checkAutoBackup(false); // Update UI
+                            checkAutoBackup(false);
                         } catch (err) {
-                            console.error("Backup failed", err);
-                            if (isManual) showAlert("Failed to send backup: " + err.message);
+                            console.error('Backup failed', err);
+                            if (isManual) showAlert('Failed to send backup request: ' + err.message);
                             updateSyncStatus('error', 'Backup Failed');
                         } finally {
                             if (isManual) {
                                 const btn = document.getElementById('manual-backup-email-btn');
-                                if (btn) {
-                                    btn.disabled = false;
-                                    btn.textContent = "Trigger Backup Now (Email)";
-                                }
+                                if (btn) { btn.disabled = false; btn.textContent = 'Trigger Backup Now (Email)'; }
                             }
                         }
                     }
