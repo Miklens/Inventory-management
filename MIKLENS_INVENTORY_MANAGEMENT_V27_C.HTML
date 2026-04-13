@@ -2635,27 +2635,35 @@
 
                                 ensureLockedSerialNumbers();
 
+                                appState.requisitionReservedTotals = appState.requisitionReservedTotals || { rawMaterials: [], packingMaterials: [], labels: [] };
+
                                 // Save this fresh cloud data to local as well
                                 localStorage.setItem('inventoryAppState', JSON.stringify(appState));
-                                // Requisition reservations (Store issued, awaiting Manager approval) – show as reserved until Manager approves
-                                if (useFirebase && window.FirebaseBackend) {
-                                    try {
-                                        var reqRes = await window.FirebaseBackend.callBackend('get_requisition_reserved_totals', {});
-                                        if (reqRes && reqRes.result === 'success') {
-                                            appState.requisitionReservedTotals = { rawMaterials: reqRes.rawMaterials || [], packingMaterials: reqRes.packingMaterials || [], labels: reqRes.labels || [] };
-                                        } else {
-                                            appState.requisitionReservedTotals = { rawMaterials: [], packingMaterials: [], labels: [] };
-                                        }
-                                    } catch (e) {
-                                        appState.requisitionReservedTotals = { rawMaterials: [], packingMaterials: [], labels: [] };
-                                    }
-                                } else {
-                                    appState.requisitionReservedTotals = appState.requisitionReservedTotals || { rawMaterials: [], packingMaterials: [], labels: [] };
-                                }
                                 hasUnsyncedChanges = false;
-                                updateSyncStatus('success', 'Data loaded');
+                                updateSyncStatus('success', useFirebase ? 'Firebase data loaded' : 'Cloud data loaded');
                                 if (typeof checkAutoBackup === 'function') checkAutoBackup(false);
                                 renderCurrentView();
+
+                                // Load requisition reservations in the background so the sync status is not blocked.
+                                if (useFirebase && window.FirebaseBackend) {
+                                    window.FirebaseBackend.callBackend('get_requisition_reserved_totals', {})
+                                        .then(function (reqRes) {
+                                            if (reqRes && reqRes.result === 'success') {
+                                                appState.requisitionReservedTotals = {
+                                                    rawMaterials: reqRes.rawMaterials || [],
+                                                    packingMaterials: reqRes.packingMaterials || [],
+                                                    labels: reqRes.labels || []
+                                                };
+                                            } else {
+                                                appState.requisitionReservedTotals = { rawMaterials: [], packingMaterials: [], labels: [] };
+                                            }
+                                            localStorage.setItem('inventoryAppState', JSON.stringify(appState));
+                                            if (typeof renderCurrentView === 'function') renderCurrentView();
+                                        })
+                                        .catch(function () {
+                                            appState.requisitionReservedTotals = { rawMaterials: [], packingMaterials: [], labels: [] };
+                                        });
+                                }
                             } else {
                                 console.warn("Cloud returned no data or error", result);
                                 loadLocalData(); // Fallback
