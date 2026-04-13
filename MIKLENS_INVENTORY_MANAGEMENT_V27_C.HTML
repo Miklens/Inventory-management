@@ -2092,6 +2092,10 @@
                     if (autoRefreshEnabled && (cloudApiUrl || useFirebase)) {
                         startAutoRefresh();
                     }
+
+                    if (typeof startAutoBackupScheduler === 'function') {
+                        startAutoBackupScheduler();
+                    }
                 });
 
                 function startAutoRefresh() {
@@ -2156,8 +2160,8 @@
 
                     // 3. Periodic tasks
                     if (typeof checkAutoBackup === 'function') {
-                        // Debounce/Defer backup check slightly to avoid blocking UI save
-                        setTimeout(checkAutoBackup, 500);
+                        // Update backup UI after save without triggering scheduled backup.
+                        setTimeout(function () { checkAutoBackup(false); }, 500);
                     }
                 }
 
@@ -10971,6 +10975,19 @@
                              console.log("Auto-backup interval reached. Triggering...");
                              triggerAutoBackup(false);
                         }
+                    }
+
+                    function startAutoBackupScheduler() {
+                        if (window._autoBackupSchedulerStarted) return;
+                        window._autoBackupSchedulerStarted = true;
+
+                        setTimeout(function () {
+                            if (typeof checkAutoBackup === 'function') checkAutoBackup(true);
+                        }, 1500);
+
+                        window._autoBackupScheduler = setInterval(function () {
+                            if (typeof checkAutoBackup === 'function') checkAutoBackup(true);
+                        }, 10 * 60 * 1000);
                     }
 
                     async function triggerAutoBackup(isManual = false) {
