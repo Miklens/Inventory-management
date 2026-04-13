@@ -2092,10 +2092,6 @@
                     if (autoRefreshEnabled && (cloudApiUrl || useFirebase)) {
                         startAutoRefresh();
                     }
-
-                    if (typeof startAutoBackupScheduler === 'function') {
-                        startAutoBackupScheduler();
-                    }
                 });
 
                 function startAutoRefresh() {
@@ -2645,6 +2641,8 @@
                                 localStorage.setItem('inventoryAppState', JSON.stringify(appState));
                                 hasUnsyncedChanges = false;
                                 updateSyncStatus('success', useFirebase ? 'Firebase data loaded' : 'Cloud data loaded');
+                                // Start backup scheduler only after real data is loaded (so lastAutoBackup has its actual value).
+                                if (typeof startAutoBackupScheduler === 'function') startAutoBackupScheduler();
                                 if (typeof checkAutoBackup === 'function') checkAutoBackup(false);
                                 renderCurrentView();
 
@@ -10981,10 +10979,12 @@
                         if (window._autoBackupSchedulerStarted) return;
                         window._autoBackupSchedulerStarted = true;
 
+                        // Delay first check so any in-progress login/sync can fully settle.
                         setTimeout(function () {
                             if (typeof checkAutoBackup === 'function') checkAutoBackup(true);
-                        }, 1500);
+                        }, 5000);
 
+                        // Re-check every 10 minutes.
                         window._autoBackupScheduler = setInterval(function () {
                             if (typeof checkAutoBackup === 'function') checkAutoBackup(true);
                         }, 10 * 60 * 1000);
