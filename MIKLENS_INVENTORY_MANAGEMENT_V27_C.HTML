@@ -2654,7 +2654,7 @@
                                 }
                                 hasUnsyncedChanges = false;
                                 updateSyncStatus('success', 'Data loaded');
-                                if (typeof checkAutoBackup === 'function') checkAutoBackup();
+                                if (typeof checkAutoBackup === 'function') checkAutoBackup(false);
                                 renderCurrentView();
                             } else {
                                 console.warn("Cloud returned no data or error", result);
@@ -10939,7 +10939,7 @@
 
                     // --- AUTOMATED BACKUP LOGIC ---
 
-                    function checkAutoBackup() {
+                    function checkAutoBackup(allowTrigger = true) {
                         if (!appState.lastAutoBackup) appState.lastAutoBackup = 0;
                         const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
                         const now = Date.now();
@@ -10959,7 +10959,7 @@
                         }
 
                         // Trigger if interval passed
-                        if (now >= nextBackup && (cloudApiUrl || useFirebase)) {
+                            if (allowTrigger && now >= nextBackup && (cloudApiUrl || useFirebase)) {
                              console.log("Auto-backup interval reached. Triggering...");
                              triggerAutoBackup(false);
                         }
@@ -11019,7 +11019,7 @@
                             if (isManual) showAlert("Manual backup request sent to Admin/Manager via Email!");
                             showToast(isManual ? "Manual Email Backup Sent" : "Scheduled Auto-Backup Sent", "success");
                             updateSyncStatus('success', 'Backup Sent');
-                            checkAutoBackup(); // Update UI
+                            checkAutoBackup(false); // Update UI
                         } catch (err) {
                             console.error("Backup failed", err);
                             if (isManual) showAlert("Failed to send backup: " + err.message);
